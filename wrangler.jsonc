@@ -1,0 +1,6 @@
+{
+  // Cloudflare Worker со статикой: всё из ./public раздаётся как сайт
+  "name": "my-planner",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./public" }
+}

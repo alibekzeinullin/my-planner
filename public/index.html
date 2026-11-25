@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мой планер</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fbfaf7;--card:#fff;--ink:#17201f;--mut:#5e6967;--line:#ebe7df;--soft:#f1eee8;--teal:#0f766e;--teal-d:#0b5a54;--teal-s:#eaf4f2;--red:#e4572e;--red-d:#b33a17;--ROW:52px}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Onest,system-ui,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.wrap{max-width:1320px;margin:0 auto;padding:28px max(3vw,16px) 60px}
+header{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.mon{font-size:13px;font-weight:600;color:var(--mut)}
+h1{margin:2px 0 0;font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+.week{display:flex;gap:6px;align-items:center}
+.wd{width:54px;height:64px;border-radius:14px;border:0;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:inset 0 0 0 1px var(--line)}
+.wd span{font-size:11px;font-weight:600;color:var(--mut)}.wd b{font-size:20px;font-weight:800}
+.wd i{width:5px;height:5px;border-radius:50%;background:transparent}.wd i.on{background:var(--teal)}.wd i.ov{background:var(--red)}
+.wd.sel{background:var(--ink);box-shadow:none}.wd.sel span,.wd.sel b{color:#fff}
+.wd.today:not(.sel) b{color:var(--teal)}
+.arr{width:36px;height:44px;border:0;background:none;font-size:20px;color:var(--mut);border-radius:10px}
+.arr:hover{background:var(--soft)}
+form.quick{margin-left:auto;display:flex;align-items:center;gap:8px;border:1.5px solid var(--ink);border-radius:14px;padding:0 6px 0 16px;width:min(420px,100%);background:var(--card)}
+form.quick input{flex:1;border:0;outline:none;background:transparent;font-size:15px;height:48px}
+.btn{height:40px;padding:0 16px;border:0;border-radius:10px;background:var(--teal);color:#fff;font-weight:700;font-size:14px;white-space:nowrap}
+.btn.ghost{background:transparent;color:var(--teal-d);box-shadow:inset 0 0 0 1.5px var(--teal)}
+.btn.w{background:#fff;color:var(--red-d)}
+.btn.red{background:var(--red)}
+.btn:disabled{opacity:.6;cursor:wait}
+.hint{font-size:13px;color:var(--mut);min-height:18px;margin:8px 0 0;text-align:right}
+nav{display:flex;gap:4px;margin:14px 0 18px;flex-wrap:wrap;align-items:center}
+.tab{border:0;background:none;padding:9px 14px;border-radius:10px;font-weight:600;color:var(--mut);min-height:40px}
+.tab.on{background:var(--ink);color:#fff}
+.tab small{font-weight:700;margin-left:4px;opacity:.7}
+nav .set{margin-left:auto}
+.grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:24px;align-items:start}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:18px 20px}
+.ch{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:700;color:var(--mut);margin-bottom:8px}
+.ch .hi{color:var(--red)}
+.tl{position:relative;margin-top:4px}
+.hr{height:var(--ROW);border-top:1px solid var(--soft);display:flex}
+.hr span{width:48px;font-size:12px;color:var(--mut);padding-top:3px;font-variant-numeric:tabular-nums}
+.blk{position:absolute;border-radius:12px;padding:6px 10px 6px 8px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;overflow:hidden;border:0;text-align:left}
+.blk .t{font-size:14px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk>div{min-width:0}
+.blk .m{font-size:12px;opacity:.75;margin-top:1px}
+.blk.done{opacity:.45}.blk.done .t{text-decoration:line-through}
+.blk.p1 .t::after{content:" · срочно";color:var(--red);font-weight:700;font-size:12px}
+.chk{width:22px;height:22px;flex:none;border-radius:50%;border:2px solid #a9b2b0;background:#fff;display:grid;place-items:center;padding:0;font-size:12px;line-height:1}
+.chk.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.now{position:absolute;left:40px;right:0;height:2px;background:var(--red);pointer-events:none}
+.now::before{content:"";position:absolute;left:-6px;top:-5px;width:12px;height:12px;border-radius:50%;background:var(--red)}
+.side{display:flex;flex-direction:column;gap:16px}
+.over{background:var(--red);color:#fff;border-radius:20px;padding:14px 18px;display:flex;flex-direction:column;gap:10px}
+.over .k{font-size:12px;font-weight:700;opacity:.85}
+.orow{display:flex;gap:10px;align-items:center}
+.orow .tt{flex:1;font-weight:700;cursor:pointer}
+.orow .chk{border-color:#fff;background:transparent}
+.ai{background:var(--teal-s);border-radius:20px;padding:16px 20px}
+.ai .k{font-size:13px;font-weight:700;color:var(--teal-d);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ai p{margin:8px 0 12px;font-size:14px;line-height:1.55;white-space:pre-line}
+.li{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--soft)}
+.li:first-of-type{border-top:0}
+.li .tt{flex:1;font-weight:600;cursor:pointer}
+.li .mm{font-size:12px;color:var(--mut);white-space:nowrap}
+.li.done .tt{text-decoration:line-through;color:var(--mut)}
+.mini{height:32px;padding:0 10px;border:0;border-radius:8px;background:var(--soft);font-size:12px;font-weight:700;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.empty{color:var(--mut);font-size:14px;padding:8px 0}
+.goal{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:16px;align-items:center;padding:14px 0;border-top:1px solid var(--soft);cursor:pointer}
+.goal:first-of-type{border-top:0}
+.goal .k{font-size:12px;color:var(--mut)}.goal .t{font-size:17px;font-weight:700}
+.bar{height:8px;background:var(--soft);border-radius:99px}.bar>div{height:100%;border-radius:99px;background:var(--teal)}
+.pct{font-size:12px;text-align:right;color:var(--mut);margin-top:4px}
+dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
+dialog::backdrop{background:rgb(23 32 31/.45)}
+.dlg{padding:22px;display:grid;gap:12px}
+.dlg h3{margin:0;font-size:22px}
+label{display:grid;gap:4px;font-size:13px;color:var(--mut)}
+.f{height:44px;border:1px solid var(--line);background:var(--bg);padding:0 12px;font-size:16px;border-radius:10px}
+textarea.f{height:80px;padding:10px 12px;resize:vertical}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.acts{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;margin-top:4px}
+.login{max-width:420px;margin:14vh auto;padding:0 16px;display:grid;gap:14px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;max-width:90vw;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.sr{position:absolute;left:-9999px}
+@media(prefers-reduced-motion:reduce){.toast{transition:none}}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.side{order:-1}form.quick{margin-left:0;width:100%}.week{overflow-x:auto;width:100%}}
+@media(max-width:520px){h1{font-size:28px}.wd{width:44px;height:58px}.two{grid-template-columns:1fr}.goal{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<dialog id="dlg"><form class="dlg" id="dlgForm" method="dialog"></form></dialog>
+<div class="toast" id="toast" role="status"></div>
+<script>
+{
+const API = 'https://boqdferziwrkbntjmnsn.supabase.co/functions/v1/planner?action=api';
+const START = 7, END = 23; // часы на шкале
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const WD = ['вс','пн','вт','ср','чт','пт','сб'];
+const WDF = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+const MON = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MONN = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const PRI = {1:'Срочно',2:'Важно',3:'Обычно',4:'Когда-нибудь'};
+const REC = {'':'Не повторять',daily:'Каждый день',weekdays:'По будням',weekly:'Каждую неделю',biweekly:'Раз в 2 недели',monthly:'Каждый месяц'};
+
+let KEY = null, D = null, tab = 'day', day = null, weekOff = 0, planBusy = false;
+try { KEY = localStorage.getItem('planner_key'); } catch (e) {}
+const hk = location.hash.match(/key=([a-f0-9]+)/);
+if (hk) { KEY = hk[1]; try { localStorage.setItem('planner_key', KEY); } catch (e) {} history.replaceState(null, '', location.pathname); }
+
+function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2600); }
+async function call(op, body = {}) {
+  const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': KEY }, body: JSON.stringify({ op, ...body }) });
+  if (r.status === 401) { logout(); throw new Error('Неверный ключ'); }
+  const j = await r.json(); if (j.error) throw new Error(j.error); return j;
+}
+function logout() { KEY = null; try { localStorage.removeItem('planner_key'); } catch (e) {} renderLogin(); }
+
+const addDays = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const dow = s => new Date(s + 'T00:00:00Z').getUTCDay();
+const toMin = t => { const [h, m] = t.split(':'); return +h * 60 + +m; };
+const fmin = m => m >= 60 ? `${Math.floor(m / 60)}ч${m % 60 ? ' ' + m % 60 + 'м' : ''}` : `${m}м`;
+const hhmm = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+function fdate(s) { if (!s) return ''; const t = D.today; if (s === t) return 'сегодня'; if (s === addDays(t, 1)) return 'завтра'; if (s === addDays(t, -1)) return 'вчера'; const [, m, d] = s.split('-'); return `${WD[dow(s)]}, ${+d} ${MON[+m - 1]}`; }
+const area = id => D.areas.find(a => a.id === id);
+const col = id => (area(id) || {}).color || '#5e6967';
+const nowMin = () => { const d = new Date(Date.now() + D.tz_offset * 36e5); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+const open = () => D.tasks.filter(x => x.status === 'todo' && !x.parent_id);
+const localDone = x => x.done_at ? new Date(new Date(x.done_at).getTime() + D.tz_offset * 36e5).toISOString().slice(0, 10) : null;
+
+function renderLogin(msg = '') {
+  $('#app').innerHTML = `<div class="login"><h1>Мой планер</h1>
+  <p>Введи ключ доступа — его пришлёт бот по команде /site.</p>
+  <form id="lf" style="display:grid;gap:10px"><label class="sr" for="lk">Ключ</label><input class="f" id="lk" autocomplete="off" placeholder="Ключ"><button class="btn" style="height:48px">Войти</button></form>
+  <p style="color:var(--red)">${esc(msg)}</p></div>`;
+  $('#lf').onsubmit = e => { e.preventDefault(); KEY = $('#lk').value.trim(); try { localStorage.setItem('planner_key', KEY); } catch (er) {} load(); };
+}
+
+async function load() {
+  if (!KEY) return renderLogin();
+  try { D = await call('bootstrap'); if (!day) day = D.today; render(); } catch (e) { if (KEY) renderLogin(e.message); }
+}
+
+function weekDays() {
+  const base = addDays(D.today, weekOff * 7);
+  const mon = addDays(base, -((dow(base) + 6) % 7));
+  return [0, 1, 2, 3, 4, 5, 6].map(i => addDays(mon, i));
+}
+
+function render() {
+  const all = open(), t = D.today;
+  const [y, m, d] = day.split('-');
+  const inboxN = all.filter(x => !x.due_date).length;
+  const tabs = [['day', 'День', ''], ['inbox', 'Без даты', inboxN || ''], ['goals', 'Цели и мечты', ''], ['done', 'Сделано', '']];
+  $('#app').innerHTML = `<div class="wrap"><header>
+    <div><div class="mon">${MONN[+m - 1]} ${y}</div><h1>${WDF[dow(day)]}, ${+d}</h1></div>
+    <div class="week">
+      <button class="arr" id="wPrev" aria-label="Прошлая неделя">‹</button>
+      ${weekDays().map(s => {
+        const has = all.some(x => x.due_date === s), ov = s === t && all.some(x => x.due_date && x.due_date < t);
+        return `<button class="wd ${s === day ? 'sel' : ''} ${s === t ? 'today' : ''}" data-day="${s}" aria-label="${fdate(s)}"><span>${WD[dow(s)]}</span><b>${+s.slice(8)}</b><i class="${ov ? 'ov' : has ? 'on' : ''}"></i></button>`;
+      }).join('')}
+      <button class="arr" id="wNext" aria-label="Следующая неделя">›</button>
+    </div>
+    <form class="quick" id="qf"><label class="sr" for="qi">Новая задача</label><input id="qi" placeholder="Напиши как боту: «завтра в 11 созвон»" autocomplete="off"><button class="btn">Добавить</button></form>
+  </header>
+  <p class="hint" id="qh"></p>
+  <nav>${tabs.map(([k, n, c]) => `<button class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${n}${c ? `<small>${c}</small>` : ''}</button>`).join('')}
+    <button class="tab set" id="setBtn">Настройки</button></nav>
+  <main id="main"></main></div>`;
+  $('#qf').onsubmit = quickAdd;
+  $('#setBtn').onclick = openSettings;
+  $('#wPrev').onclick = () => { weekOff--; render(); };
+  $('#wNext').onclick = () => { weekOff++; render(); };
+  document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { day = b.dataset.day; tab = 'day'; render(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; if (tab === 'day') { day = D.today; weekOff = 0; } render(); });
+  $('#main').innerHTML = ({ day: vDay, inbox: vInbox, goals: vGoals, done: vDone }[tab] || vDay)();
+  bind();
+}
+
+function vDay() {
+  const t = D.today, isToday = day === t;
+  const items = D.tasks.filter(x => !x.parent_id && x.status !== 'cancelled' && x.due_date === day && (x.status === 'todo' || localDone(x) === day || x.due_date === day));
+  const timed = items.filter(x => x.due_time).sort((a, b) => toMin(a.due_time) - toMin(b.due_time));
+  const loose = items.filter(x => !x.due_time);
+  const over = isToday ? open().filter(x => x.due_date && x.due_date < t) : [];
+  const load = [...items.filter(x => x.status === 'todo'), ...over].reduce((s, x) => s + (x.estimate_min || 30), 0);
+  const ROW = 52;
+  // раскладка по дорожкам, если задачи пересекаются
+  const lanes = []; const placed = timed.map(x => {
+    const s = Math.max(toMin(x.due_time), START * 60), e = s + Math.max(x.estimate_min || 30, 30);
+    let li = lanes.findIndex(end => end <= s); if (li < 0) { li = lanes.length; lanes.push(0); } lanes[li] = e;
+    return { x, s, e, li };
+  });
+  const nL = Math.max(1, lanes.length);
+  const blocks = placed.map(({ x, s, e, li }) => {
+    const c = col(x.area_id), a = area(x.area_id);
+    const top = (s - START * 60) / 60 * ROW + 2, h = Math.max((e - s) / 60 * ROW - 4, 34);
+    return `<div class="blk ${x.status === 'done' ? 'done' : ''} p${x.priority}" data-edit="${x.id}" style="top:${top}px;height:${h}px;left:calc(52px + (100% - 52px) * ${li / nL});width:calc((100% - 52px) / ${nL} - 6px);background:color-mix(in srgb, ${esc(c)} 16%, #fff)">
+      <button class="chk ${x.status === 'done' ? 'on' : ''}" data-done="${x.id}" aria-label="${x.status === 'done' ? 'Вернуть' : 'Готово'}">${x.status === 'done' ? '✓' : ''}</button>
+      <div style="color:var(--ink)"><div class="t">${esc(x.title)}</div>${h >= 44 ? `<div class="m">${hhmm(s)}–${hhmm(e)}${a ? ' · ' + esc(a.name) : ''}</div>` : ''}</div></div>`;
+  }).join('');
+  const hours = []; for (let h = START; h < END; h++) hours.push(`<div class="hr"><span>${String(h).padStart(2, '0')}:00</span></div>`);
+  const nm = nowMin();
+  const nowLine = isToday && nm >= START * 60 && nm < END * 60 ? `<div class="now" style="top:${(nm - START * 60) / 60 * ROW}px"></div>` : '';
+  const planTxt = D.plan;
+  return `<div class="grid">
+    <section class="card">
+      <div class="ch"><span>День по часам</span><span class="${load > 480 ? 'hi' : ''}">нагрузка ${fmin(load)} из ~8ч</span></div>
+      <div class="tl">${hours.join('')}${blocks}${nowLine}</div>
+      ${!timed.length ? '<p class="empty">Задач со временем нет. Напиши, например: «в 16:00 позвонить в банк».</p>' : ''}
+    </section>
+    <aside class="side">
+      ${over.length ? `<div class="over"><div class="k">ПРОСРОЧЕНО · ${over.length}</div>${over.map(x => `<div class="orow">
+        <button class="chk" data-done="${x.id}" aria-label="Готово"></button>
+        <span class="tt" data-edit="${x.id}">${esc(x.title)}<br><small style="opacity:.8;font-weight:500">с ${fdate(x.due_date)}${x.postponed_count ? ' · переносов: ' + x.postponed_count : ''}</small></span>
+        <button class="btn w" data-move="${x.id}" data-to="${t}">Сегодня</button></div>`).join('')}</div>` : ''}
+      ${isToday ? `<div class="ai"><div class="k"><span>План от ИИ</span><button class="btn ${planTxt ? 'ghost' : ''}" id="planBtn" ${planBusy ? 'disabled' : ''}>${planBusy ? 'Думаю…' : planTxt ? 'Обновить' : 'Составить план'}</button></div>
+        <p>${planTxt ? esc(planTxt) : 'Нажми — ИИ посмотрит задачи, просрочку и нагрузку и предложит порядок дня. Утром в 8:00 план приходит сам.'}</p></div>` : ''}
+      <div class="card"><div class="ch"><span>Без времени${isToday ? '' : ' · ' + fdate(day)}</span><span>${loose.filter(x => x.status === 'todo').length}</span></div>
+        ${loose.length ? loose.map(liHtml).join('') : '<p class="empty">Пусто</p>'}</div>
+      ${isToday ? inboxPeek() : ''}
+    </aside></div>`;
+}
+function liHtml(x) {
+  const isDone = x.status === 'done', a = area(x.area_id);
+  return `<div class="li ${isDone ? 'done' : ''}"><button class="chk ${isDone ? 'on' : ''}" data-done="${x.id}" aria-label="${isDone ? 'Вернуть' : 'Готово'}">${isDone ? '✓' : ''}</button>
+    <span class="tt" data-edit="${x.id}">${a ? `<span class="dot" style="background:${esc(a.color)}"></span>` : ''}${esc(x.title)}</span>
+    <span class="mm">${x.estimate_min ? fmin(x.estimate_min) : ''}${x.priority === 1 ? ' · <b style="color:var(--red)">срочно</b>' : ''}</span></div>`;
+}
+function inboxPeek() {
+  const arr = open().filter(x => !x.due_date).sort((a, b) => a.priority - b.priority).slice(0, 4);
+  if (!arr.length) return '';
+  return `<div class="card"><div class="ch"><span>Можно взять сегодня</span><span>из «Без даты»</span></div>${arr.map(x => `<div class="li">
+    <span class="tt" data-edit="${x.id}">${esc(x.title)}</span><button class="mini" data-move="${x.id}" data-to="${D.today}">+ сегодня</button></div>`).join('')}</div>`;
+}
+function vInbox() {
+  const arr = open().filter(x => !x.due_date).sort((a, b) => a.priority - b.priority);
+  const t = D.today;
+  return `<section class="card" style="max-width:820px"><div class="ch"><span>Без даты — разбери и назначь день</span><span>${arr.length}</span></div>
+    ${arr.length ? arr.map(x => `<div class="li"><button class="chk" data-done="${x.id}" aria-label="Готово"></button>
+      <span class="tt" data-edit="${x.id}">${area(x.area_id) ? `<span class="dot" style="background:${esc(col(x.area_id))}"></span>` : ''}${esc(x.title)} <small style="color:var(--mut)">${PRI[x.priority]}</small></span>
+      <button class="mini" data-move="${x.id}" data-to="${t}">Сегодня</button><button class="mini" data-move="${x.id}" data-to="${addDays(t, 1)}">Завтра</button></div>`).join('') : '<p class="empty">Входящие пусты 👌</p>'}</section>`;
+}
+function vGoals() {
+  const g = D.goals.filter(x => x.status !== 'dropped');
+  const block = (kind, title, empty) => {
+    const arr = g.filter(x => x.kind === kind);
+    return `<section class="card"><div class="ch"><span>${title}</span><span>${arr.length}</span></div>${arr.map(x => {
+      const linked = D.tasks.filter(t => t.goal_id === x.id), done = linked.filter(t => t.status === 'done').length;
+      const pct = linked.length ? Math.round(done / linked.length * 100) : (x.progress || 0);
+      return `<div class="goal" data-goal="${x.id}"><div><div class="k">${x.target_date ? 'до ' + esc(x.target_date) : 'без срока'}${x.status === 'done' ? ' · достигнуто' : ''}${linked.length ? ` · задач ${done}/${linked.length}` : ''}</div><div class="t">${esc(x.title)}</div></div>
+      <div><div class="bar"><div style="width:${pct}%"></div></div><div class="pct">${pct}%</div></div></div>`;
+    }).join('') || `<p class="empty">${empty}</p>`}</section>`;
+  };
+  return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">${block('dream', 'Мечты', 'Напиши боту «мечтаю…» или добавь здесь')}${block('goal', 'Цели', 'Цель — то, что можно измерить и закончить к сроку')}</div>
+    <p><button class="btn" id="addGoal" style="height:44px">+ Цель или мечта</button></p>`;
+}
+function vDone() {
+  const arr = D.tasks.filter(x => x.status === 'done' && !x.parent_id).sort((a, b) => String(b.done_at).localeCompare(String(a.done_at)));
+  return `<section class="card" style="max-width:820px"><div class="ch"><span>Сделано за 30 дней</span><span>${arr.length}</span></div>${arr.length ? arr.map(liHtml).join('') : '<p class="empty">Пока ничего</p>'}</section>`;
+}
+
+function bind() {
+  document.querySelectorAll('[data-done]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const x = D.tasks.find(t => t.id === +b.dataset.done); if (!x) return;
+    try {
+      if (x.status === 'done') { await call('task_undo', { id: x.id }); toast('Вернул в работу'); }
+      else { const r = await call('task_done', { id: x.id }); toast(r.message); }
+      load();
+    } catch (er) { toast(er.message); }
+  });
+  document.querySelectorAll('[data-move]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    try { await call('task_update', { id: +b.dataset.move, patch: { due_date: b.dataset.to } }); toast('Перенёс на ' + fdate(b.dataset.to)); load(); } catch (er) { toast(er.message); }
+  });
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openTask(D.tasks.find(t => t.id === +b.dataset.edit)));
+  document.querySelectorAll('[data-goal]').forEach(b => b.onclick = () => openGoal(D.goals.find(g => g.id === +b.dataset.goal)));
+  const ag = $('#addGoal'); if (ag) ag.onclick = () => openGoal(null);
+  const pb = $('#planBtn'); if (pb) pb.onclick = async () => {
+    planBusy = true; render();
+    try { const r = await call('plan'); D.plan = r.text; } catch (er) { toast(er.message); }
+    planBusy = false; render();
+  };
+}
+
+async function quickAdd(e) {
+  e.preventDefault();
+  const v = $('#qi').value.trim(); if (!v) return;
+  $('#qh').textContent = 'Думаю…';
+  try {
+    const r = await call('quick_add', { text: v });
+    await load();
+    $('#qh').textContent = [r.reply, ...(r.messages || [])].filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 200) || 'Готово';
+  } catch (er) { $('#qh').textContent = er.message; }
+}
+
+function opts(map, cur) { return Object.entries(map).map(([k, v]) => `<option value="${esc(k)}" ${String(cur ?? '') === String(k) ? 'selected' : ''}>${esc(v)}</option>`).join(''); }
+
+function openTask(x) {
+  if (!x) return;
+  const recMap = { ...REC }; if (x.recurrence && !(x.recurrence in recMap)) recMap[x.recurrence] = x.recurrence;
+  $('#dlgForm').innerHTML = `<h3>Задача</h3>
+    <label>Название<input class="f" name="title" value="${esc(x.title)}" required></label>
+    <label>Заметки<textarea class="f" name="notes">${esc(x.notes || '')}</textarea></label>
+    <div class="two"><label>Дата<input class="f" type="date" name="due_date" value="${esc(x.due_date || '')}"></label>
+    <label>Время<input class="f" type="time" name="due_time" value="${esc(x.due_time || '')}"></label></div>
+    <div class="two"><label>Приоритет<select class="f" name="priority">${opts(PRI, x.priority)}</select></label>
+    <label>Длительность, мин<input class="f" type="number" min="5" step="5" name="estimate_min" value="${esc(x.estimate_min || '')}"></label></div>
+    <div class="two"><label>Сфера<select class="f" name="area_id"><option value="">—</option>${D.areas.map(a => `<option value="${a.id}" ${a.id === x.area_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+    <label>Повтор<select class="f" name="recurrence">${opts(recMap, x.recurrence || '')}</select></label></div>
+    <label>Цель<select class="f" name="goal_id"><option value="">—</option>${D.goals.filter(g => g.status === 'active').map(g => `<option value="${g.id}" ${g.id === x.goal_id ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}</select></label>
+    <div class="acts"><button type="button" class="btn red" id="del" style="height:44px">Удалить</button><span style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancel" style="height:44px">Отмена</button><button class="btn" style="height:44px">Сохранить</button></span></div>`;
+  const dlg = $('#dlg'); dlg.showModal();
+  $('#cancel').onclick = () => dlg.close();
+  $('#del').onclick = async () => { if ($('#del').dataset.sure) { await call('task_delete', { id: x.id }); dlg.close(); toast('Удалено'); load(); } else { $('#del').dataset.sure = 1; $('#del').textContent = 'Точно удалить?'; } };
+  $('#dlgForm').onsubmit = async e => {
+    e.preventDefault();
+    const p = {};
+    for (const [k, v] of new FormData($('#dlgForm')).entries()) p[k] = v === '' ? null : v;
+    ['priority', 'estimate_min', 'area_id', 'goal_id'].forEach(k => { if (p[k] != null) p[k] = +p[k]; });
+    if (p.due_date === x.due_date) delete p.due_date;
+    if (p.due_time === x.due_time) delete p.due_time;
+    try { await call('task_update', { id: x.id, patch: p }); dlg.close(); toast('Сохранено'); load(); } catch (er) { toast(er.message); }
+  };
+}
+
+function openGoal(g) {
+  g = g || { kind: 'goal', title: '', status: 'active', progress: 0 };
+  $('#dlgForm').innerHTML = `<h3>${g.id ? 'Изменить' : 'Новая цель или мечта'}</h3>
+    <div class="two"><label>Тип<select class="f" name="kind">${opts({ dream: 'Мечта', goal: 'Цель' }, g.kind)}</select></label>
+    <label>Срок<input class="f" type="date" name="target_date" value="${esc(g.target_date || '')}"></label></div>
+    <label>Название<input class="f" name="title" value="${esc(g.title)}" required></label>
+    <label>Зачем это мне / как пойму, что достиг<textarea class="f" name="description">${esc(g.description || '')}</textarea></label>
+    <div class="two"><label>Сфера<select class="f" name="area_id"><option value="">—</option>${D.areas.map(a => `<option value="${a.id}" ${a.id === g.area_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+    <label>Прогресс, %<input class="f" type="number" min="0" max="100" name="progress" value="${esc(g.progress || 0)}"></label></div>
+    <label>Статус<select class="f" name="status">${opts({ active: 'В работе', done: 'Достигнуто', paused: 'На паузе', dropped: 'Отказался' }, g.status)}</select></label>
+    <div class="acts"><span></span><span style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancel" style="height:44px">Отмена</button><button class="btn" style="height:44px">Сохранить</button></span></div>`;
+  const dlg = $('#dlg'); dlg.showModal();
+  $('#cancel').onclick = () => dlg.close();
+  $('#dlgForm').onsubmit = async e => {
+    e.preventDefault();
+    const goal = Object.fromEntries(new FormData($('#dlgForm')).entries()); goal.id = g.id; goal.area_id = goal.area_id ? +goal.area_id : null;
+    try { await call('goal_save', { goal }); dlg.close(); toast('Сохранено'); load(); } catch (er) { toast(er.message); }
+  };
+}
+
+function openSettings() {
+  $('#dlgForm').innerHTML = `<h3>Настройки</h3>
+    <div class="two"><label>Утренний план, час<input class="f" type="number" min="4" max="12" name="morning_hour" value="${esc(D.morning_hour)}"></label>
+    <label>Вечерний итог, час<input class="f" type="number" min="17" max="23" name="evening_hour" value="${esc(D.evening_hour)}"></label></div>
+    <div class="acts"><button type="button" class="btn ghost" id="out" style="height:44px">Выйти</button><span style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancel" style="height:44px">Отмена</button><button class="btn" style="height:44px">Сохранить</button></span></div>`;
+  const dlg = $('#dlg'); dlg.showModal();
+  $('#cancel').onclick = () => dlg.close();
+  $('#out').onclick = () => { dlg.close(); logout(); };
+  $('#dlgForm').onsubmit = async e => { e.preventDefault(); await call('settings_save', Object.fromEntries(new FormData($('#dlgForm')).entries())); dlg.close(); toast('Сохранено'); load(); };
+}
+
+load();
+setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && document.activeElement?.id !== 'qi') load(); }, 60000);
+}
+</script>
+</body>
+</html>
