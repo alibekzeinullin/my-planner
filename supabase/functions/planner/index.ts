@@ -370,7 +370,7 @@ const ACT_TOOL = {
         items: {
           type: "object",
           properties: {
-            type: { type: "string", enum: ["add", "complete", "update", "delete", "show", "plan", "goal_add", "remember", "forget", "balance"] },
+            type: { type: "string", enum: ["add", "complete", "update", "delete", "show", "plan", "goal_add", "remember", "forget", "balance", "routine_add", "routine_delete"] },
             id: { type: "integer", description: "id существующей задачи (для complete/update/delete)" },
             title: { type: "string" },
             notes: { type: "string" },
@@ -388,6 +388,10 @@ const ACT_TOOL = {
             fact: { type: "string", description: "для remember: факт о пользователе своими словами, кратко" },
             category: { type: "string", description: "для remember: work | family | health | routine | goals | people | preferences | other" },
             memory_id: { type: "integer", description: "для forget: id факта из памяти" },
+            days: { type: "array", items: { type: "integer" }, description: "для routine_add: дни недели 1=пн … 7=вс" },
+            start_time: { type: "string", description: "для routine_add: HH:MM" },
+            end_time: { type: "string", description: "для routine_add: HH:MM" },
+            routine_id: { type: "integer", description: "для routine_delete: id блока распорядка" },
           },
           required: ["type"],
         },
@@ -402,7 +406,8 @@ async function context() {
   const tasks = await openTasks();
   const goals = await sql`select id, kind, title, target_date::text from life.goals where status = 'active' order by id`;
   const memory = await memoryFacts();
-  return { areas, tasks, goals, memory };
+  const routines = await allRoutines();
+  return { areas, tasks, goals, memory, routines };
 }
 
 function nowLine() {
@@ -420,7 +425,7 @@ async function processText(text: string, source = "bot"): Promise<Out> {
     out.sends.push({ text: `📝 Записал (без ИИ, ключ не подключён):\n\n${fmtTask(t)}`, extra: { reply_markup: taskKb(t.id) } });
     return out;
   }
-  const { areas, tasks, goals, memory } = await context();
+  const { areas, tasks, goals, memory, routines } = await context();
   const today = todayStr();
   const days = Array.from({ length: 8 }, (_, i) => {
     const d = addDays(today, i);
@@ -433,6 +438,7 @@ ${nowLine()}
 Открытые задачи (id | задача | срок | сфера):
 ${tasks.slice(0, 120).map((t) => `${t.id} | ${t.title} | ${t.due_date ?? "-"}${t.due_time ? " " + t.due_time : ""} | ${t.area ?? "-"}`).join("\n") || "(нет)"}
 Цели и мечты: ${goals.map((g) => `${g.id}:${g.title}`).join("; ") || "(нет)"}
+Распорядок (id: блок, дни, время): ${routines.map((r) => `${r.id}: ${r.title}, ${fmtDays(r.days)}, ${r.start}–${r.end}`).join("; ") || "(пусто)"}
 Что ты знаешь о пользователе (id: факт):
 ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)"}
 
@@ -450,6 +456,7 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
 - "Что на сегодня/завтра/неделю", "что просрочено", "покажи всё" → show со scope.
 - "Спланируй день", "что делать сейчас", "с чего начать" → plan.
 - "Хочу/мечтаю/цель ..." (про жизнь, не конкретное дело) → goal_add (goal_kind dream или goal, title).
+- Регулярный распорядок — повторяющийся блок времени ("работа с 11 до 19", "по субботам группы 10–14", "спортзал пн/ср/пт в 7–8", "сплю с 23 до 7") → routine_add (title, days 1=пн…7=вс, start_time, end_time, area). Если дни не названы для работы — пн–пт. Это НЕ задача и НЕ remember. Если такой блок уже есть в распорядке — не дублируй. "Убери из распорядка X" → routine_delete с routine_id.
 - "Запомни/учти/знай, что ..." или явный устойчивый факт о жизни (режим, люди, работа, предпочтения) → remember (fact кратко, от третьего лица). Обычные задачи НЕ запоминай. "Забудь ..." → forget с memory_id.
 - "Как мой баланс", "что проседает", "обзор жизни/недели" → balance.
 - Учитывай факты о пользователе при выборе сферы, времени и приоритета.
@@ -482,6 +489,13 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
       } else if (a.type === "show") out.sends.push(await view(a.scope ?? "today"));
       else if (a.type === "plan") out.plan = true;
       else if (a.type === "balance") out.balance = true;
+      else if (a.type === "routine_add" && a.start_time && a.end_time) {
+        const r = await saveRoutine(a);
+        out.sends.push({ text: `🗓 Добавил в распорядок: ${esc(r.title)} — ${fmtDays(r.days)}, ${r.start_time}–${r.end_time}\nТеперь это видно на шкале дня, и я не буду ставить личные дела поверх.`, extra: {} });
+      } else if (a.type === "routine_delete" && a.routine_id) {
+        await sql`update life.routines set active = false where id = ${a.routine_id}`;
+        out.sends.push({ text: "🗓 Убрал из распорядка", extra: {} });
+      }
       else if (a.type === "remember" && a.fact) {
         await sql`insert into life.memory(fact, category) values (${String(a.fact).slice(0, 500)}, ${a.category || "other"})`;
         out.sends.push({ text: `🧠 Запомнил: ${esc(a.fact)}`, extra: {} });
@@ -534,6 +548,7 @@ ${overdue.map(line).join("\n") || "(нет)"}
 Без даты (самые важные):
 ${inbox.map(line).join("\n") || "(нет)"}
 Суммарная нагрузка сегодня+просрочка: ~${load} мин.
+Распорядок сегодня: ${(await routinesFor(today)).map((r) => `${r.title} ${r.start}–${r.end}`).join("; ") || "(нет)"}
 Факты о человеке: ${(await memoryFacts()).map((m) => m.fact).join("; ") || "(нет)"}
 Последние чекины (день: энергия/настроение 1–5, заметка): ${(await recentCheckins(5)).map((c) => `${c.day}: ${c.energy ?? "-"}/${c.mood ?? "-"} ${c.note ?? ""}`).join("; ") || "(нет)"}`;
   const system = `Ты — личный планировщик. Составь ${kind === "morning" ? "утренний " : ""}план дня. Обращайся на "ты". Пиши обычным текстом без HTML и без markdown (никаких * и #), можно немного эмодзи.
@@ -543,7 +558,8 @@ ${inbox.map(line).join("\n") || "(нет)"}
 3) если нагрузка больше ~6 часов или задач слишком много — честно скажи и предложи конкретно, что перенести;
 4) если есть просроченные больше 2 дней или задачи, перенесённые 3+ раз — спроси прямо: делаем, разбиваем на шаги или удаляем;
 5) если сегодня пусто — предложи 1–2 задачи из "без даты";
-6) учитывай факты о человеке и его энергию: если вчера энергия была низкой — сделай день легче и скажи об этом.
+6) учитывай распорядок: рабочие задачи ставь в рабочие блоки, личные — в свободные окна вне блоков; назови свободные окна;
+7) учитывай факты о человеке и его энергию: если вчера энергия была низкой — сделай день легче и скажи об этом.
 Максимум 15 строк. Без воды.`;
   try {
     const txt = (await llm("smart", system, prompt, undefined, 900)).text.trim();
@@ -603,6 +619,46 @@ async function weekly(): Promise<string> {
   if (stuck.length) t += "\n\n🧱 Буксуют:\n" + stuck.map((s) => `• ${esc(s.title)} (переносов: ${s.postponed_count})`).join("\n");
   if (inbox[0].n) t += `\n\n📥 Без даты: ${inbox[0].n} — разберём? /inbox`;
   return t;
+}
+
+// ---------- распорядок ----------
+const DAYN = ["", "пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+const isoDow = (d: string) => dowOf(d) || 7;
+async function allRoutines() {
+  return await sql`select r.id, r.title, r.area_id, r.days, to_char(r.start_time, 'HH24:MI') as start, to_char(r.end_time, 'HH24:MI') as "end", a.name as area
+    from life.routines r left join life.areas a on a.id = r.area_id where r.active order by r.start_time, r.id`;
+}
+async function routinesFor(day: string) {
+  return (await allRoutines()).filter((r) => (r.days ?? []).includes(isoDow(day)));
+}
+function fmtDays(days: number[]) {
+  const k = [...days].sort().join(",");
+  if (k === "1,2,3,4,5,6,7") return "каждый день";
+  if (k === "1,2,3,4,5") return "пн–пт";
+  if (k === "1,2,3,4,5,6") return "пн–сб";
+  if (k === "6,7") return "выходные";
+  return [...days].sort().map((d) => DAYN[d]).join(", ");
+}
+// deno-lint-ignore no-explicit-any
+async function saveRoutine(r: any) {
+  const days = (Array.isArray(r.days) ? r.days : [1, 2, 3, 4, 5]).map((x: unknown) => +x).filter((x: number) => x >= 1 && x <= 7);
+  const row = {
+    title: String(r.title ?? "").slice(0, 120) || "Блок",
+    area_id: await areaId(r.area, r.area_id),
+    days: days.length ? days : [1, 2, 3, 4, 5],
+    start_time: String(r.start_time ?? r.start ?? "09:00").slice(0, 5),
+    end_time: String(r.end_time ?? r.end ?? "10:00").slice(0, 5),
+  };
+  if (r.id) await sql`update life.routines set ${sql(row)} where id = ${+r.id}`;
+  else await sql`insert into life.routines ${sql(row)}`;
+  return row;
+}
+async function sendRoutines(chat: string | number) {
+  const rs = await allRoutines();
+  if (!rs.length) return send(chat, "🗓 Распорядок пуст.\nНапиши, например: «работа пн–пт с 9 до 18» или «по субботам группы с 10 до 14».");
+  await send(chat, "🗓 <b>Распорядок</b>\n\n" + rs.map((r, i) => `${i + 1}. ${esc(r.title)} — ${fmtDays(r.days)}, ${r.start}–${r.end}`).join("\n"), {
+    reply_markup: { inline_keyboard: rs.map((r, i) => [{ text: `🗑 ${i + 1}. ${r.title}`.slice(0, 60), callback_data: `rd:${r.id}` }]) },
+  });
 }
 
 // ---------- ассистент: память, чекины, баланс сфер, нарастающие напоминания ----------
@@ -870,9 +926,11 @@ const HELP = `Я твой личный планер 🗂
 /balance — обзор жизни: какие сферы проседают
 /checkin — вечерний чекин
 /memory — что я о тебе знаю
+/routine — распорядок (работа, группы, спорт)
 /site — ссылка на сайт
 
 Скажи «запомни, что …» — и я буду это учитывать.
+Регулярное расписание пиши так: «работа пн–сб с 11 до 19» — оно попадёт в распорядок.
 
 Утром в 8:00 — план, в 12:00 — проверка дедлайнов, в 21:00 — итог и чекин, по воскресеньям — оценка недели.`;
 
@@ -922,6 +980,7 @@ async function onUpdate(u: any, s: S) {
   if (cmd === "/checkin") return sendCheckin(chat, todayStr());
   if (cmd === "/rate") return sendRating(chat);
   if (cmd === "/memory") return sendMemory(chat);
+  if (cmd === "/routine") return sendRoutines(chat);
   if (cmd === "/goals") {
     const g = await sql`select kind, title, target_date::text as td, progress from life.goals where status = 'active' order by kind, id`;
     if (!g.length) return send(chat, "Целей пока нет. Напиши, например: «мечтаю выучить японский до N3» ✨");
@@ -999,6 +1058,11 @@ async function onCallback(q: any, s: S) {
     toast = "Забыл";
     await tg("deleteMessage", { chat_id: chat, message_id: msg.message_id });
     await sendMemory(chat);
+  } else if (op === "rd") {
+    await sql`update life.routines set active = false where id = ${id}`;
+    toast = "Убрал из распорядка";
+    await tg("deleteMessage", { chat_id: chat, message_id: msg.message_id });
+    await sendRoutines(chat);
   } else if (op === "vi") {
     const v = await view("inbox");
     await send(chat, v.text, v.extra);
@@ -1044,12 +1108,18 @@ async function api(body: any) {
     const goals = await sql`select id, kind, title, description, area_id, parent_id, target_date::text as target_date, status, progress from life.goals where status <> 'dropped' order by id`;
     const s = await getSettings();
     const plan = s.last_plan_at === todayStr() ? s.last_plan : null;
-    return { tasks, areas, goals, plan, today: todayStr(), tz_offset: OFF, morning_hour: s.morning_hour, evening_hour: s.evening_hour };
+    const routines = await allRoutines();
+    return { tasks, areas, goals, plan, routines, today: todayStr(), tz_offset: OFF, morning_hour: s.morning_hour, evening_hour: s.evening_hour };
   }
   if (op === "plan") {
     const txt = await planText("manual");
     await savePlan(txt);
     return { text: unesc(txt) };
+  }
+  if (op === "routine_save") { await saveRoutine(body.routine ?? {}); return { routines: await allRoutines() }; }
+  if (op === "routine_delete") {
+    await sql`update life.routines set active = false where id = ${+body.id}`;
+    return { routines: await allRoutines() };
   }
   if (op === "balance") {
     return { areas: await areaStats(), checkins: await recentCheckins(21), memory: await memoryFacts(), review: (await getSettings()).last_review ?? null };
@@ -1140,6 +1210,7 @@ Deno.serve(async (req) => {
           { command: "balance", description: "Обзор жизни: что проседает" },
           { command: "checkin", description: "Вечерний чекин" },
           { command: "memory", description: "Что я о тебе знаю" },
+          { command: "routine", description: "Распорядок" },
           { command: "site", description: "Сайт-дашборд" },
           { command: "help", description: "Как пользоваться" },
         ],

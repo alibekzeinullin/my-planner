@@ -52,6 +52,11 @@ nav .set{margin-left:auto}
 .blk .m{font-size:12px;opacity:.75;margin-top:1px}
 .blk.done{opacity:.45}.blk.done .t{text-decoration:line-through}
 .blk.p1 .t::after{content:" · срочно";color:var(--red);font-weight:700;font-size:12px}
+.rtn{position:absolute;left:52px;right:0;border-radius:12px;background:repeating-linear-gradient(135deg,#f3f1ec 0 8px,#ebe8e1 8px 16px);pointer-events:none}
+.rtn span{position:absolute;right:10px;top:6px;font-size:12px;font-weight:700;color:var(--mut);background:#f3f1ecd9;padding:1px 6px;border-radius:6px}
+.blk{z-index:1}.now{z-index:2}
+.rl{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--soft);font-size:14px}.rl span{flex:1}
+.dchk{display:flex;gap:4px;flex-wrap:wrap}.dchk label{display:flex;align-items:center;gap:3px;font-size:13px;color:var(--ink)}
 .chk{width:22px;height:22px;flex:none;border-radius:50%;border:2px solid #a9b2b0;background:#fff;display:grid;place-items:center;padding:0;font-size:12px;line-height:1}
 .chk.on{background:var(--ink);border-color:var(--ink);color:#fff}
 .now{position:absolute;left:40px;right:0;height:2px;background:var(--red);pointer-events:none}
@@ -100,7 +105,7 @@ nav .set{margin-left:auto}
 .mem:first-of-type{border-top:0}.mem span{flex:1}
 .x{width:32px;height:32px;border:0;border-radius:8px;background:var(--soft);font-size:16px;line-height:1}
 @media(max-width:900px){.lifeg{grid-template-columns:minmax(0,1fr)}.cks{grid-template-columns:56px repeat(21,minmax(0,1fr))}}
-dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
+dialog{max-height:90vh;overflow:auto;border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
 dialog::backdrop{background:rgb(23 32 31/.45)}
 .dlg{padding:22px;display:grid;gap:12px}
 .dlg h3{margin:0;font-size:22px}
@@ -201,7 +206,7 @@ function render() {
     <button class="tab set" id="setBtn">Настройки</button></nav>
   <main id="main"></main></div>`;
   $('#qf').onsubmit = quickAdd;
-  $('#setBtn').onclick = openSettings;
+  $('#setBtn').onclick = () => openSettings();
   $('#wPrev').onclick = () => { weekOff--; render(); };
   $('#wNext').onclick = () => { weekOff++; render(); };
   document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { day = b.dataset.day; tab = 'day'; render(); });
@@ -233,15 +238,20 @@ function vDay() {
       <button class="chk ${x.status === 'done' ? 'on' : ''}" data-done="${x.id}" aria-label="${x.status === 'done' ? 'Вернуть' : 'Готово'}">${x.status === 'done' ? '✓' : ''}</button>
       <div style="color:var(--ink)"><div class="t">${esc(x.title)}</div>${h >= 44 ? `<div class="m">${hhmm(s)}–${hhmm(e)}${a ? ' · ' + esc(a.name) : ''}</div>` : ''}</div></div>`;
   }).join('');
+  const rts = (D.routines || []).filter(r => (r.days || []).includes(dow(day) || 7));
+  const rtHtml = rts.map(r => { const s = Math.max(toMin(r.start), START * 60), e = Math.min(toMin(r.end), END * 60); if (e <= s) return '';
+    return `<div class="rtn" style="top:${(s - START * 60) / 60 * ROW + 1}px;height:${(e - s) / 60 * ROW - 2}px"><span>${esc(r.title)} · ${r.start}–${r.end}</span></div>`; }).join('');
+  const rtMin = rts.reduce((m, r) => m + Math.max(0, toMin(r.end) - toMin(r.start)), 0);
   const hours = []; for (let h = START; h < END; h++) hours.push(`<div class="hr"><span>${String(h).padStart(2, '0')}:00</span></div>`);
   const nm = nowMin();
   const nowLine = isToday && nm >= START * 60 && nm < END * 60 ? `<div class="now" style="top:${(nm - START * 60) / 60 * ROW}px"></div>` : '';
   const planTxt = D.plan;
   return `<div class="grid">
     <section class="card">
-      <div class="ch"><span>День по часам</span><span class="${load > 480 ? 'hi' : ''}">нагрузка ${fmin(load)} из ~8ч</span></div>
-      <div class="tl">${hours.join('')}${blocks}${nowLine}</div>
+      <div class="ch"><span>День по часам</span><span class="${load > 480 ? 'hi' : ''}">${rtMin ? 'распорядок ' + fmin(rtMin) + ' · ' : ''}задачи ${fmin(load)}</span></div>
+      <div class="tl">${hours.join('')}${rtHtml}${blocks}${nowLine}</div>
       ${!timed.length ? '<p class="empty">Задач со временем нет. Напиши, например: «в 16:00 позвонить в банк».</p>' : ''}
+      ${!(D.routines || []).length ? '<p class="empty">Добавь распорядок — напиши боту «работа пн–сб с 11 до 19» или открой Настройки.</p>' : ''}
     </section>
     <aside class="side">
       ${over.length ? `<div class="over"><div class="k">ПРОСРОЧЕНО · ${over.length}</div>${over.map(x => `<div class="orow">
@@ -447,13 +457,35 @@ function openGoal(g) {
   };
 }
 
-function openSettings() {
+function routineHtml() {
+  const rs = D.routines || [], DN = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  const dd = r => (r.days || []).slice().sort().map(d => DN[d - 1]).join(', ');
+  return `<div><div class="ch" style="margin:6px 0 0"><span>Распорядок — регулярные блоки</span></div>
+    ${rs.map(r => `<div class="rl"><span><b>${esc(r.title)}</b><br><small style="color:var(--mut)">${dd(r)} · ${r.start}–${r.end}</small></span><button type="button" class="x" data-rdel="${r.id}" aria-label="Удалить">×</button></div>`).join('') || '<p class="empty">Пока пусто</p>'}
+    <div style="display:grid;gap:8px;margin-top:8px;padding:12px;border-radius:12px;background:var(--bg)">
+      <input class="f" id="rtT" placeholder="Например: Работа, Спортзал, Группы">
+      <div class="dchk">${DN.map((n, i) => `<label><input type="checkbox" value="${i + 1}" ${i < 5 ? 'checked' : ''}>${n}</label>`).join('')}</div>
+      <div class="two"><label>С<input class="f" type="time" id="rtS" value="09:00"></label><label>До<input class="f" type="time" id="rtE" value="18:00"></label></div>
+      <button type="button" class="btn ghost" id="rtAdd" style="height:44px">+ Добавить блок</button></div></div>`;
+}
+function bindRoutines() {
+  document.querySelectorAll('[data-rdel]').forEach(b => b.onclick = async () => { const r = await call('routine_delete', { id: +b.dataset.rdel }); D.routines = r.routines; openSettings(true); });
+  const ad = $('#rtAdd'); if (ad) ad.onclick = async () => {
+    const title = $('#rtT').value.trim(); if (!title) { $('#rtT').focus(); return; }
+    const days = [...document.querySelectorAll('.dchk input:checked')].map(i => +i.value);
+    const r = await call('routine_save', { routine: { title, days, start_time: $('#rtS').value, end_time: $('#rtE').value } });
+    D.routines = r.routines; openSettings(true); toast('Добавил в распорядок');
+  };
+}
+function openSettings(keep) {
   $('#dlgForm').innerHTML = `<h3>Настройки</h3>
+    ${routineHtml()}
     <div class="two"><label>Утренний план, час<input class="f" type="number" min="4" max="12" name="morning_hour" value="${esc(D.morning_hour)}"></label>
     <label>Вечерний итог, час<input class="f" type="number" min="17" max="23" name="evening_hour" value="${esc(D.evening_hour)}"></label></div>
     <div class="acts"><button type="button" class="btn ghost" id="out" style="height:44px">Выйти</button><span style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancel" style="height:44px">Отмена</button><button class="btn" style="height:44px">Сохранить</button></span></div>`;
-  const dlg = $('#dlg'); dlg.showModal();
-  $('#cancel').onclick = () => dlg.close();
+  const dlg = $('#dlg'); if (!dlg.open) dlg.showModal();
+  bindRoutines();
+  $('#cancel').onclick = () => { dlg.close(); render(); };
   $('#out').onclick = () => { dlg.close(); logout(); };
   $('#dlgForm').onsubmit = async e => { e.preventDefault(); await call('settings_save', Object.fromEntries(new FormData($('#dlgForm')).entries())); dlg.close(); toast('Сохранено'); load(); };
 }
