@@ -370,7 +370,7 @@ const ACT_TOOL = {
         items: {
           type: "object",
           properties: {
-            type: { type: "string", enum: ["add", "complete", "update", "delete", "show", "plan", "goal_add"] },
+            type: { type: "string", enum: ["add", "complete", "update", "delete", "show", "plan", "goal_add", "remember", "forget", "balance"] },
             id: { type: "integer", description: "id существующей задачи (для complete/update/delete)" },
             title: { type: "string" },
             notes: { type: "string" },
@@ -385,6 +385,9 @@ const ACT_TOOL = {
             scope: { type: "string", enum: ["today", "tomorrow", "week", "overdue", "inbox", "all"] },
             goal_kind: { type: "string", enum: ["dream", "goal"] },
             target_date: { type: "string" },
+            fact: { type: "string", description: "для remember: факт о пользователе своими словами, кратко" },
+            category: { type: "string", description: "для remember: work | family | health | routine | goals | people | preferences | other" },
+            memory_id: { type: "integer", description: "для forget: id факта из памяти" },
           },
           required: ["type"],
         },
@@ -398,7 +401,8 @@ async function context() {
   const areas = await sql`select id, name from life.areas where not archived order by sort`;
   const tasks = await openTasks();
   const goals = await sql`select id, kind, title, target_date::text from life.goals where status = 'active' order by id`;
-  return { areas, tasks, goals };
+  const memory = await memoryFacts();
+  return { areas, tasks, goals, memory };
 }
 
 function nowLine() {
@@ -407,7 +411,7 @@ function nowLine() {
   return `Сейчас: ${t} (${WD_FULL[ln.getUTCDay()]}), ${ln.toISOString().slice(11, 16)} местного времени (UTC+${OFF}).`;
 }
 
-type Out = { reply: string; sends: { text: string; extra: Record<string, unknown> }[]; plan?: boolean };
+type Out = { reply: string; sends: { text: string; extra: Record<string, unknown> }[]; plan?: boolean; balance?: boolean };
 
 async function processText(text: string, source = "bot"): Promise<Out> {
   const out: Out = { reply: "", sends: [] };
@@ -416,7 +420,7 @@ async function processText(text: string, source = "bot"): Promise<Out> {
     out.sends.push({ text: `📝 Записал (без ИИ, ключ не подключён):\n\n${fmtTask(t)}`, extra: { reply_markup: taskKb(t.id) } });
     return out;
   }
-  const { areas, tasks, goals } = await context();
+  const { areas, tasks, goals, memory } = await context();
   const today = todayStr();
   const days = Array.from({ length: 8 }, (_, i) => {
     const d = addDays(today, i);
@@ -429,6 +433,8 @@ ${nowLine()}
 Открытые задачи (id | задача | срок | сфера):
 ${tasks.slice(0, 120).map((t) => `${t.id} | ${t.title} | ${t.due_date ?? "-"}${t.due_time ? " " + t.due_time : ""} | ${t.area ?? "-"}`).join("\n") || "(нет)"}
 Цели и мечты: ${goals.map((g) => `${g.id}:${g.title}`).join("; ") || "(нет)"}
+Что ты знаешь о пользователе (id: факт):
+${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)"}
 
 Правила:
 - Если человек описывает дело (даже без глагола "добавь") → add. Несколько дел в одном сообщении → несколько add.
@@ -444,6 +450,9 @@ ${tasks.slice(0, 120).map((t) => `${t.id} | ${t.title} | ${t.due_date ?? "-"}${t
 - "Что на сегодня/завтра/неделю", "что просрочено", "покажи всё" → show со scope.
 - "Спланируй день", "что делать сейчас", "с чего начать" → plan.
 - "Хочу/мечтаю/цель ..." (про жизнь, не конкретное дело) → goal_add (goal_kind dream или goal, title).
+- "Запомни/учти/знай, что ..." или явный устойчивый факт о жизни (режим, люди, работа, предпочтения) → remember (fact кратко, от третьего лица). Обычные задачи НЕ запоминай. "Забудь ..." → forget с memory_id.
+- "Как мой баланс", "что проседает", "обзор жизни/недели" → balance.
+- Учитывай факты о пользователе при выборе сферы, времени и приоритета.
 - reply: 1 короткая фраза, по делу, без воды. Для show/plan reply можно оставить пустым. На общие вопросы отвечай в reply кратко.`;
 
   // deno-lint-ignore no-explicit-any
@@ -472,6 +481,14 @@ ${tasks.slice(0, 120).map((t) => `${t.id} | ${t.title} | ${t.due_date ?? "-"}${t
         out.sends.push({ text: "🗑 Удалил", extra: {} });
       } else if (a.type === "show") out.sends.push(await view(a.scope ?? "today"));
       else if (a.type === "plan") out.plan = true;
+      else if (a.type === "balance") out.balance = true;
+      else if (a.type === "remember" && a.fact) {
+        await sql`insert into life.memory(fact, category) values (${String(a.fact).slice(0, 500)}, ${a.category || "other"})`;
+        out.sends.push({ text: `🧠 Запомнил: ${esc(a.fact)}`, extra: {} });
+      } else if (a.type === "forget" && a.memory_id) {
+        const r = await sql`update life.memory set active = false where id = ${a.memory_id} returning fact`;
+        if (r.length) out.sends.push({ text: `🧹 Забыл: ${esc(r[0].fact)}`, extra: {} });
+      }
       else if (a.type === "goal_add" && a.title) {
         await sql`insert into life.goals ${sql({ kind: a.goal_kind === "dream" ? "dream" : "goal", title: a.title, target_date: a.target_date || null, area_id: await areaId(a.area) })}`;
         out.sends.push({ text: `${a.goal_kind === "dream" ? "✨ Мечта" : "🎯 Цель"} записана: ${esc(a.title)}`, extra: {} });
@@ -516,14 +533,17 @@ ${todays.map(line).join("\n") || "(нет)"}
 ${overdue.map(line).join("\n") || "(нет)"}
 Без даты (самые важные):
 ${inbox.map(line).join("\n") || "(нет)"}
-Суммарная нагрузка сегодня+просрочка: ~${load} мин.`;
+Суммарная нагрузка сегодня+просрочка: ~${load} мин.
+Факты о человеке: ${(await memoryFacts()).map((m) => m.fact).join("; ") || "(нет)"}
+Последние чекины (день: энергия/настроение 1–5, заметка): ${(await recentCheckins(5)).map((c) => `${c.day}: ${c.energy ?? "-"}/${c.mood ?? "-"} ${c.note ?? ""}`).join("; ") || "(нет)"}`;
   const system = `Ты — личный планировщик. Составь ${kind === "morning" ? "утренний " : ""}план дня. Обращайся на "ты". Пиши обычным текстом без HTML и без markdown (никаких * и #), можно немного эмодзи.
 Структура:
 1) одна строка приветствия/настроя${kind === "morning" ? "" : " (можно пропустить)"};
 2) порядок дня: сначала дела со временем, остальное блоками по приоритету (утро/день/вечер), указывай оценку времени;
 3) если нагрузка больше ~6 часов или задач слишком много — честно скажи и предложи конкретно, что перенести;
 4) если есть просроченные больше 2 дней или задачи, перенесённые 3+ раз — спроси прямо: делаем, разбиваем на шаги или удаляем;
-5) если сегодня пусто — предложи 1–2 задачи из "без даты".
+5) если сегодня пусто — предложи 1–2 задачи из "без даты";
+6) учитывай факты о человеке и его энергию: если вчера энергия была низкой — сделай день легче и скажи об этом.
 Максимум 15 строк. Без воды.`;
   try {
     const txt = (await llm("smart", system, prompt, undefined, 900)).text.trim();
@@ -560,8 +580,12 @@ async function evening(chat: string | number) {
   const extra = left.length
     ? { reply_markup: { inline_keyboard: [[{ text: "📅 Перенести оставшиеся на завтра", callback_data: "pa" }]] } }
     : {};
+  const tm = addDays(today, 1);
+  const tLoad = (await openTasks()).filter((t) => !t.parent_id && t.due_date === tm).reduce((s, t) => s + (t.estimate_min ?? 30), 0);
+  if (tLoad > 420) text += `\n\n⚠️ Завтра ~${fmtMin(tLoad)} задач — это много. Глянь /tomorrow и перенеси лишнее.`;
   await send(chat, text, extra);
-  if (dowOf(today) === 0) await send(chat, await weekly());
+  await sendCheckin(chat, today);
+  if (dowOf(today) === 0) await sendRating(chat);
 }
 
 async function weekly(): Promise<string> {
@@ -581,6 +605,218 @@ async function weekly(): Promise<string> {
   return t;
 }
 
+// ---------- ассистент: память, чекины, баланс сфер, нарастающие напоминания ----------
+async function memoryFacts() {
+  return await sql`select id, fact, category from life.memory where active order by id`;
+}
+async function recentCheckins(days = 14) {
+  return await sql`select day::text as day, energy, mood, note from life.checkins
+    where day >= ${addDays(todayStr(), -days)}::date order by day`;
+}
+const weekStart = (d: string) => addDays(d, -((dowOf(d) + 6) % 7));
+async function nudgedRecently(kind: string, ref: string, days: number) {
+  const r = await sql`select 1 from life.nudges where kind = ${kind} and ref = ${ref}
+    and sent_at > now() - make_interval(days => ${days}) limit 1`;
+  return r.length > 0;
+}
+async function markNudge(kind: string, ref: string) {
+  await sql`insert into life.nudges(kind, ref) values (${kind}, ${ref})`;
+}
+
+async function areaStats() {
+  const today = todayStr();
+  const ws = weekStart(today), pws = addDays(ws, -7);
+  return await sql`
+    select a.id, a.name, a.emoji, a.color,
+      count(t.id) filter (where t.status = 'done' and t.done_at > now() - interval '7 days')::int as done7,
+      count(t.id) filter (where t.status = 'done' and t.done_at <= now() - interval '7 days' and t.done_at > now() - interval '14 days')::int as done_prev,
+      coalesce(sum(coalesce(t.estimate_min, 30)) filter (where t.status = 'done' and t.done_at > now() - interval '7 days'), 0)::int as min7,
+      count(t.id) filter (where t.status = 'todo')::int as open,
+      count(t.id) filter (where t.status = 'todo' and t.due_date < ${today}::date)::int as overdue,
+      extract(day from now() - greatest(max(t.done_at), max(t.created_at)))::int as idle_days,
+      (select score from life.area_ratings r where r.area_id = a.id and r.week_start = ${ws}::date) as rating,
+      (select score from life.area_ratings r where r.area_id = a.id and r.week_start = ${pws}::date) as rating_prev
+    from life.areas a
+    left join life.tasks t on t.area_id = a.id and t.parent_id is null and t.status <> 'cancelled'
+    where not a.archived
+    group by a.id order by a.sort, a.id`;
+}
+
+// --- вечерний чекин ---
+const MOODS = ["😩", "😕", "😐", "🙂", "😄"];
+function checkinKb(day: string, energy?: number | null, mood?: number | null) {
+  return {
+    inline_keyboard: [
+      [{ text: "⚡ Энергия:", callback_data: "noop" }, ...[1, 2, 3, 4, 5].map((n) => ({ text: energy === n ? `•${n}•` : String(n), callback_data: `ce:${day}:${n}` }))],
+      [{ text: "Настроение:", callback_data: "noop" }, ...[1, 2, 3, 4, 5].map((n) => ({ text: mood === n ? `•${MOODS[n - 1]}•` : MOODS[n - 1], callback_data: `cm:${day}:${n}` }))],
+    ],
+  };
+}
+async function sendCheckin(chat: string | number, day: string) {
+  const [c] = await sql`select energy, mood from life.checkins where day = ${day}::date`;
+  await send(chat, "📝 <b>Чекин дня</b> — 10 секунд. Как ты сегодня?", { reply_markup: checkinKb(day, c?.energy, c?.mood) });
+}
+
+// --- недельная оценка сфер ---
+async function ratingKb(ws: string) {
+  const areas = await sql`select id, name, emoji from life.areas where not archived order by sort, id`;
+  const rs = await sql`select area_id, score from life.area_ratings where week_start = ${ws}::date`;
+  const got = new Map(rs.map((r) => [r.area_id, r.score]));
+  const rows = [];
+  for (const a of areas) {
+    rows.push([{ text: `${a.emoji ?? ""} ${a.name}`, callback_data: "noop" }]);
+    rows.push([1, 2, 3, 4, 5].map((n) => ({ text: got.get(a.id) === n ? `✓${n}` : String(n), callback_data: `ar:${ws}:${a.id}:${n}` })));
+  }
+  rows.push([{ text: "📊 Готово — получить обзор жизни", callback_data: "rv" }]);
+  return { inline_keyboard: rows };
+}
+async function sendRating(chat: string | number) {
+  const ws = weekStart(todayStr());
+  await send(chat, "🧭 <b>Оценка недели</b>\nКак прошла неделя в каждой сфере? 1 — совсем плохо, 5 — отлично. Можно пропустить любую.", { reply_markup: await ratingKb(ws) });
+}
+
+// --- обзор жизни ---
+async function lifeReview(): Promise<string> {
+  const stats = await areaStats();
+  const checks = await recentCheckins(14);
+  const mem = await memoryFacts();
+  const goals = await sql`select title, kind, target_date::text as td, progress from life.goals where status = 'active'`;
+  const stuck = await sql`select title, postponed_count from life.tasks where status = 'todo' and postponed_count >= 3 order by postponed_count desc limit 5`;
+  const avg = (k: "energy" | "mood") => {
+    const v = checks.map((c) => c[k]).filter((x) => x != null);
+    return v.length ? (v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : "нет данных";
+  };
+  const lines = stats.map((a) =>
+    `- ${a.name}: сделано за 7 дней ${a.done7} (неделей раньше ${a.done_prev}), ~${a.min7} мин; открыто ${a.open}, просрочено ${a.overdue}; без действий ${a.idle_days ?? "—"} дн.; самооценка ${a.rating ?? "—"}/5 (прошлая ${a.rating_prev ?? "—"})`
+  ).join("\n");
+  const fallback = () => {
+    const low = stats.filter((a) => (a.rating ?? 5) <= 2 || (a.idle_days ?? 0) >= 10 || a.overdue > 0);
+    return `<b>Обзор жизни</b>\n\n${stats.map((a) => `${a.emoji ?? ""} ${esc(a.name)}: ✅${a.done7} · ⚠️${a.overdue}${a.rating ? ` · ${a.rating}/5` : ""}`).join("\n")}` +
+      (low.length ? `\n\n🔻 Внимание: ${low.map((a) => esc(a.name)).join(", ")}` : "") +
+      `\n\nЭнергия: ${avg("energy")} · настроение: ${avg("mood")}`;
+  };
+  if (!HAS_AI) return fallback();
+  const prompt = `${nowLine()}
+Сферы жизни за последнюю неделю:
+${lines}
+Чекины за 14 дней (энергия/настроение 1–5, заметка):
+${checks.map((c) => `${c.day}: ${c.energy ?? "-"}/${c.mood ?? "-"} ${c.note ?? ""}`).join("\n") || "(нет)"}
+Средние: энергия ${avg("energy")}, настроение ${avg("mood")}.
+Задачи, которые много раз переносились: ${stuck.map((t) => `${t.title} (${t.postponed_count})`).join("; ") || "(нет)"}
+Цели и мечты: ${goals.map((g) => `${g.title}${g.td ? " до " + g.td : ""}`).join("; ") || "(нет)"}
+Факты о человеке: ${mem.map((m) => m.fact).join("; ") || "(нет)"}`;
+  const system = `Ты — личный ассистент, который смотрит на жизнь человека целиком. Пиши на "ты", прямо и по-доброму, без воды и без нравоучений. Обычный текст без HTML и markdown (никаких * и #), можно немного эмодзи.
+Структура:
+1) одна строка — общее состояние недели;
+2) 🔻 Проседает: 1–3 сферы — почему (опирайся на цифры, самооценку, дни без действий) и один маленький конкретный шаг на следующую неделю для каждой;
+3) ✅ Идёт хорошо: 1–2 сферы, коротко;
+4) Паттерны: энергия/настроение, переносы, перекос в одну сферу — только если реально видно по данным;
+5) 🎯 Фокус недели: 3 коротких пункта.
+Не выдумывай факты, которых нет в данных. Если данных мало — так и скажи и предложи начать с чекинов. До 18 строк.`;
+  try {
+    const txt = (await llm("smart", system, prompt, undefined, 1100)).text.trim();
+    const out = esc(txt) || fallback();
+    await setSetting("last_review", unesc(out));
+    return out;
+  } catch (e) {
+    console.error(e);
+    return fallback();
+  }
+}
+async function sendReview(chat: string | number) {
+  await tg("sendChatAction", { chat_id: chat, action: "typing" });
+  await send(chat, `📊 <b>Обзор жизни</b>\n\n${await lifeReview()}`);
+}
+
+// --- память ---
+async function sendMemory(chat: string | number) {
+  const mem = await memoryFacts();
+  if (!mem.length) return send(chat, "🧠 Пока ничего о тебе не знаю.\nНапиши, например: «запомни, что по субботам у меня группы до 14:00» или «запомни, что я лучше работаю утром».");
+  const rows = [];
+  for (let i = 0; i < mem.length; i += 4) rows.push(mem.slice(i, i + 4).map((m, j) => ({ text: `🗑 ${i + j + 1}`, callback_data: `mf:${m.id}` })));
+  await send(chat, "🧠 <b>Что я о тебе знаю</b>\n\n" + mem.map((m, i) => `${i + 1}. ${esc(m.fact)}`).join("\n") + "\n\nНажми 🗑 с номером, чтобы я забыл.", { reply_markup: { inline_keyboard: rows } });
+}
+
+// --- разбить задачу на шаги ---
+const SPLIT_TOOL = {
+  name: "split", description: "Разбить задачу на шаги",
+  input_schema: { type: "object", properties: { steps: { type: "array", items: { type: "string" } } }, required: ["steps"] },
+};
+async function splitTask(id: number): Promise<string[]> {
+  const t = await getTask(id);
+  if (!t || !HAS_AI) return [];
+  try {
+    const r = await llm("fast", "Разбей задачу на 3–5 маленьких конкретных шагов по-русски. Первый шаг — на 10–15 минут, чтобы легко начать. Коротко, без нумерации.", `Задача: ${t.title}${t.notes ? "\nЗаметки: " + t.notes : ""}`, SPLIT_TOOL, 500);
+    const steps: string[] = (r.input?.steps ?? []).map((x: unknown) => String(x)).filter(Boolean).slice(0, 5);
+    for (const st of steps) {
+      await sql`insert into life.tasks ${sql({ title: st.slice(0, 300), parent_id: id, area_id: t.area_id, priority: t.priority, due_date: t.due_date, source: "split" })}`;
+    }
+    await logEvent("split", id, { steps });
+    return steps;
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}
+
+// --- нарастающие напоминания (раз в день, в обед) ---
+const escKb = (id: number) => ({
+  inline_keyboard: [
+    [{ text: "📌 Сегодня", callback_data: `t0:${id}` }, { text: "📅 Завтра", callback_data: `t:${id}` }],
+    [{ text: "🪜 Разбить на шаги", callback_data: `sp:${id}` }, { text: "🗑 Удалить", callback_data: `x:${id}` }],
+  ],
+});
+async function escalations(chat: string | number) {
+  const today = todayStr();
+  let sent = 0;
+  // 1) пропущенные дедлайны
+  const missed = await sql`select ${TASK_COLS} from life.tasks t left join life.areas a on a.id = t.area_id
+    where t.status = 'todo' and t.parent_id is null and t.due_date < ${today}::date
+    order by t.priority, t.due_date desc limit 10`;
+  for (const t of missed) {
+    if (sent >= 5) break;
+    if (await nudgedRecently("missed", String(t.id), 3)) continue;
+    const days = Math.round((Date.parse(today) - Date.parse(t.due_date)) / 864e5);
+    const head = t.postponed_count >= 3
+      ? `🧱 Переносишь уже ${t.postponed_count} раз и срок прошёл ${days} дн. назад.\nМожет, разбить на маленькие шаги или честно удалить?`
+      : days <= 1 ? "⏰ Вчера был срок. Что делаем?" : `⏰ Срок прошёл ${days} дн. назад. Что делаем?`;
+    await send(chat, `${head}\n\n${fmtTask(t)}`, { reply_markup: escKb(t.id) });
+    await markNudge("missed", String(t.id));
+    sent++;
+  }
+  // 2) задачи, которые много раз переносили (даже если срок ещё не прошёл)
+  const stuck = await sql`select ${TASK_COLS} from life.tasks t left join life.areas a on a.id = t.area_id
+    where t.status = 'todo' and t.parent_id is null and t.postponed_count >= 3 and (t.due_date is null or t.due_date >= ${today}::date)
+    order by t.postponed_count desc limit 5`;
+  for (const t of stuck) {
+    if (sent >= 6) break;
+    if (await nudgedRecently("stuck", String(t.id), 7)) continue;
+    await send(chat, `🧱 Эту задачу ты переносишь уже ${t.postponed_count} раз. Обычно это значит, что она слишком большая или не нужна.\n\n${fmtTask(t)}`, { reply_markup: escKb(t.id) });
+    await markNudge("stuck", String(t.id));
+    sent++;
+  }
+  // 3) задачи без даты, которые висят дольше двух недель
+  if (!(await nudgedRecently("inbox", "all", 7))) {
+    const old = await sql`select count(*)::int as n from life.tasks where status = 'todo' and parent_id is null and due_date is null and created_at < now() - interval '14 days'`;
+    if (old[0].n >= 3) {
+      await send(chat, `📥 ${old[0].n} задач без даты висят больше двух недель. Давай разберём: назначь день или удали лишнее.`, { reply_markup: { inline_keyboard: [[{ text: "Показать", callback_data: "vi" }]] } });
+      await markNudge("inbox", "all");
+    }
+  }
+  // 4) затихшие сферы
+  const stats = await areaStats();
+  for (const a of stats) {
+    const quiet = a.idle_days != null && a.idle_days >= 10 && a.idle_days <= 60;
+    const lowRate = a.rating != null && a.rating <= 2;
+    if (!quiet && !lowRate) continue;
+    if (await nudgedRecently("area", String(a.id), 7)) continue;
+    const why = lowRate ? `ты оценил её на ${a.rating}/5` : `${a.idle_days} дней без единого действия`;
+    await send(chat, `🌗 Сфера «${esc(a.name)}» проседает: ${why}.\nНапиши одно маленькое дело для неё — я запишу и поставлю в план.`);
+    await markNudge("area", String(a.id));
+    break; // не больше одной сферы в день, чтобы не давить
+  }
+}
+
 // ---------- tick (pg_cron каждые 5 минут) ----------
 async function tick() {
   const s = await getSettings();
@@ -598,6 +834,11 @@ async function tick() {
   if (h >= mh && h < mh + 3 && s.last_morning !== today) {
     await setSetting("last_morning", today);
     await sendPlan(chat, "morning");
+  }
+  const md = +(s.midday_hour ?? 12);
+  if (h >= md && h < md + 4 && s.last_midday !== today) {
+    await setSetting("last_midday", today);
+    await escalations(chat);
   }
   if (h >= eh && s.last_evening !== today) {
     await setSetting("last_evening", today);
@@ -626,9 +867,14 @@ const HELP = `Я твой личный планер 🗂
 /inbox — без даты
 /plan — план дня
 /goals — цели и мечты
+/balance — обзор жизни: какие сферы проседают
+/checkin — вечерний чекин
+/memory — что я о тебе знаю
 /site — ссылка на сайт
 
-Каждое утро в 8:00 пришлю план, вечером в 21:00 — итог.`;
+Скажи «запомни, что …» — и я буду это учитывать.
+
+Утром в 8:00 — план, в 12:00 — проверка дедлайнов, в 21:00 — итог и чекин, по воскресеньям — оценка недели.`;
 
 // deno-lint-ignore no-explicit-any
 async function onUpdate(u: any, s: S) {
@@ -655,6 +901,15 @@ async function onUpdate(u: any, s: S) {
   }
   if (!text) return;
 
+  if (m.reply_to_message && s.checkin_msg) {
+    const [cday, cmid] = s.checkin_msg.split(":");
+    if (String(m.reply_to_message.message_id) === cmid) {
+      await sql`insert into life.checkins(day, note) values (${cday}::date, ${text.slice(0, 1000)})
+        on conflict (day) do update set note = excluded.note, updated_at = now()`;
+      await setSetting("checkin_msg", null);
+      return send(chat, "Записал, спасибо 🙏 Хорошего вечера.");
+    }
+  }
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
   const views: Record<string, string> = { "/today": "today", "/tomorrow": "tomorrow", "/week": "week", "/overdue": "overdue", "/inbox": "inbox", "/all": "all" };
   if (views[cmd]) {
@@ -663,7 +918,10 @@ async function onUpdate(u: any, s: S) {
   }
   if (cmd === "/start" || cmd === "/help") return send(chat, esc(HELP));
   if (cmd === "/plan") return sendPlan(chat, "manual");
-  if (cmd === "/week_review") return send(chat, await weekly());
+  if (cmd === "/week_review" || cmd === "/balance" || cmd === "/review") return sendReview(chat);
+  if (cmd === "/checkin") return sendCheckin(chat, todayStr());
+  if (cmd === "/rate") return sendRating(chat);
+  if (cmd === "/memory") return sendMemory(chat);
   if (cmd === "/goals") {
     const g = await sql`select kind, title, target_date::text as td, progress from life.goals where status = 'active' order by kind, id`;
     if (!g.length) return send(chat, "Целей пока нет. Напиши, например: «мечтаю выучить японский до N3» ✨");
@@ -679,6 +937,7 @@ async function onUpdate(u: any, s: S) {
   if (out.reply) await send(chat, esc(out.reply));
   for (const x of out.sends) await send(chat, x.text, x.extra);
   if (out.plan) await sendPlan(chat, "manual");
+  if (out.balance) await sendReview(chat);
 }
 
 // deno-lint-ignore no-explicit-any
@@ -691,7 +950,7 @@ async function onCallback(q: any, s: S) {
   const msg = q.message;
   let toast = "";
   const kb = msg?.reply_markup?.inline_keyboard ?? [];
-  const isSingle = kb.flat().some((b: { callback_data?: string }) => b.callback_data?.startsWith("h:"));
+  const isSingle = kb.flat().some((b: { callback_data?: string }) => /^(h|t0|sp):/.test(b.callback_data ?? ""));
 
   const finishSingle = async (label: string) => {
     if (isSingle) {
@@ -703,7 +962,47 @@ async function onCallback(q: any, s: S) {
     }
   };
 
-  if (op === "d") {
+  if (op === "ce" || op === "cm") {
+    const parts = data.split(":"); // ce:YYYY-MM-DD:N
+    const cday = parts[1], val = +parts[2];
+    if (op === "ce") await sql`insert into life.checkins(day, energy) values (${cday}::date, ${val}) on conflict (day) do update set energy = excluded.energy, updated_at = now()`;
+    else await sql`insert into life.checkins(day, mood) values (${cday}::date, ${val}) on conflict (day) do update set mood = excluded.mood, updated_at = now()`;
+    const [c] = await sql`select energy, mood from life.checkins where day = ${cday}::date`;
+    await tg("editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: checkinKb(cday, c.energy, c.mood) });
+    toast = "Записал";
+    if (c.energy && c.mood && !s.checkin_msg?.startsWith(cday)) {
+      const r = await tg("sendMessage", { chat_id: chat, text: "Одной фразой: что сегодня получилось или что мешало? Ответь на это сообщение (или просто пропусти).", reply_markup: { force_reply: true, input_field_placeholder: "Например: выспался, закрыл отчёт" } });
+      if (r?.result?.message_id) await setSetting("checkin_msg", `${cday}:${r.result.message_id}`);
+    }
+  } else if (op === "ar") {
+    const [, ws, aid, sc] = data.split(":");
+    await sql`insert into life.area_ratings(week_start, area_id, score) values (${ws}::date, ${+aid}, ${+sc})
+      on conflict (week_start, area_id) do update set score = excluded.score`;
+    await tg("editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: await ratingKb(ws) });
+    toast = "Оценка сохранена";
+  } else if (op === "rv") {
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: "Готовлю обзор…" });
+    await sendReview(chat);
+    return;
+  } else if (op === "t0") {
+    await updateTask(id, { due_date: todayStr() });
+    toast = "📌 На сегодня";
+    await finishSingle(toast);
+  } else if (op === "sp") {
+    await tg("answerCallbackQuery", { callback_query_id: q.id, text: "Разбиваю на шаги…" });
+    const steps = await splitTask(id);
+    await tg("editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } });
+    await send(chat, steps.length ? `🪜 Разбил на шаги:\n\n${steps.map((x, i) => `${i + 1}. ${esc(x)}`).join("\n")}\n\nНачни с первого — он маленький.` : "Не получилось разбить, попробуй переформулировать задачу.");
+    return;
+  } else if (op === "mf") {
+    await sql`update life.memory set active = false where id = ${id}`;
+    toast = "Забыл";
+    await tg("deleteMessage", { chat_id: chat, message_id: msg.message_id });
+    await sendMemory(chat);
+  } else if (op === "vi") {
+    const v = await view("inbox");
+    await send(chat, v.text, v.extra);
+  } else if (op === "d") {
     toast = await completeTask(id);
     await finishSingle(toast);
   } else if (op === "h") {
@@ -751,6 +1050,25 @@ async function api(body: any) {
     const txt = await planText("manual");
     await savePlan(txt);
     return { text: unesc(txt) };
+  }
+  if (op === "balance") {
+    return { areas: await areaStats(), checkins: await recentCheckins(21), memory: await memoryFacts(), review: (await getSettings()).last_review ?? null };
+  }
+  if (op === "review") return { text: unesc(await lifeReview()) };
+  if (op === "memory_add") {
+    const f = String(body.fact ?? "").trim();
+    if (f) await sql`insert into life.memory(fact, category) values (${f.slice(0, 500)}, ${body.category || "other"})`;
+    return { memory: await memoryFacts() };
+  }
+  if (op === "memory_delete") {
+    await sql`update life.memory set active = false where id = ${+body.id}`;
+    return { memory: await memoryFacts() };
+  }
+  if (op === "checkin_save") {
+    const day = String(body.day || todayStr());
+    await sql`insert into life.checkins(day, energy, mood, note) values (${day}::date, ${body.energy ?? null}, ${body.mood ?? null}, ${body.note ?? null})
+      on conflict (day) do update set energy = coalesce(excluded.energy, life.checkins.energy), mood = coalesce(excluded.mood, life.checkins.mood), note = coalesce(excluded.note, life.checkins.note), updated_at = now()`;
+    return { ok: true };
   }
   if (op === "quick_add") {
     const out = await processText(String(body.text ?? ""), "web");
@@ -819,6 +1137,9 @@ Deno.serve(async (req) => {
           { command: "overdue", description: "Просрочено" },
           { command: "inbox", description: "Без даты" },
           { command: "goals", description: "Цели и мечты" },
+          { command: "balance", description: "Обзор жизни: что проседает" },
+          { command: "checkin", description: "Вечерний чекин" },
+          { command: "memory", description: "Что я о тебе знаю" },
           { command: "site", description: "Сайт-дашборд" },
           { command: "help", description: "Как пользоваться" },
         ],

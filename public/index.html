@@ -78,6 +78,28 @@ nav .set{margin-left:auto}
 .goal .k{font-size:12px;color:var(--mut)}.goal .t{font-size:17px;font-weight:700}
 .bar{height:8px;background:var(--soft);border-radius:99px}.bar>div{height:100%;border-radius:99px;background:var(--teal)}
 .pct{font-size:12px;text-align:right;color:var(--mut);margin-top:4px}
+.lifeg{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:24px;align-items:start}
+.wheel{width:100%;max-width:440px;aspect-ratio:1;display:block;margin:0 auto}
+.wheel text{font:600 12px Onest,system-ui,sans-serif;fill:var(--ink)}
+.leg{display:flex;gap:16px;justify-content:center;font-size:12px;color:var(--mut);margin-top:6px}
+.leg i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.areas{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.ac{border:1px solid var(--line);border-radius:16px;padding:12px 14px;background:var(--card)}
+.ac .n{font-weight:700;display:flex;align-items:center;gap:6px}
+.ac .r{margin-left:auto;font-size:13px;color:var(--mut);font-weight:700}
+.ac .s{font-size:13px;color:var(--mut);margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.ac .s b{color:var(--ink)}
+.ac.warn{border-color:#f3c4b5;background:#fff8f5}
+.up{color:var(--teal)}.down{color:var(--red)}
+.cks{display:grid;grid-template-columns:70px repeat(21,minmax(0,1fr));gap:3px;align-items:end;font-size:11px;color:var(--mut)}
+.ckb{border-radius:3px;min-height:3px}
+.ckq{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px;font-size:13px;color:var(--mut)}
+.ckq button{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-weight:700}
+.ckq button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mem{display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--soft);font-size:14px}
+.mem:first-of-type{border-top:0}.mem span{flex:1}
+.x{width:32px;height:32px;border:0;border-radius:8px;background:var(--soft);font-size:16px;line-height:1}
+@media(max-width:900px){.lifeg{grid-template-columns:minmax(0,1fr)}.cks{grid-template-columns:56px repeat(21,minmax(0,1fr))}}
 dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
 dialog::backdrop{background:rgb(23 32 31/.45)}
 .dlg{padding:22px;display:grid;gap:12px}
@@ -113,7 +135,7 @@ const MONN = ['Январь','Февраль','Март','Апрель','Май'
 const PRI = {1:'Срочно',2:'Важно',3:'Обычно',4:'Когда-нибудь'};
 const REC = {'':'Не повторять',daily:'Каждый день',weekdays:'По будням',weekly:'Каждую неделю',biweekly:'Раз в 2 недели',monthly:'Каждый месяц'};
 
-let KEY = null, D = null, tab = 'day', day = null, weekOff = 0, planBusy = false;
+let KEY = null, D = null, tab = 'day', day = null, weekOff = 0, planBusy = false, L = null, revBusy = false;
 try { KEY = localStorage.getItem('planner_key'); } catch (e) {}
 const hk = location.hash.match(/key=([a-f0-9]+)/);
 if (hk) { KEY = hk[1]; try { localStorage.setItem('planner_key', KEY); } catch (e) {} history.replaceState(null, '', location.pathname); }
@@ -161,7 +183,7 @@ function render() {
   const all = open(), t = D.today;
   const [y, m, d] = day.split('-');
   const inboxN = all.filter(x => !x.due_date).length;
-  const tabs = [['day', 'День', ''], ['inbox', 'Без даты', inboxN || ''], ['goals', 'Цели и мечты', ''], ['done', 'Сделано', '']];
+  const tabs = [['day', 'День', ''], ['life', 'Баланс', ''], ['inbox', 'Без даты', inboxN || ''], ['goals', 'Цели и мечты', ''], ['done', 'Сделано', '']];
   $('#app').innerHTML = `<div class="wrap"><header>
     <div><div class="mon">${MONN[+m - 1]} ${y}</div><h1>${WDF[dow(day)]}, ${+d}</h1></div>
     <div class="week">
@@ -183,8 +205,9 @@ function render() {
   $('#wPrev').onclick = () => { weekOff--; render(); };
   $('#wNext').onclick = () => { weekOff++; render(); };
   document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { day = b.dataset.day; tab = 'day'; render(); });
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; if (tab === 'day') { day = D.today; weekOff = 0; } render(); });
-  $('#main').innerHTML = ({ day: vDay, inbox: vInbox, goals: vGoals, done: vDone }[tab] || vDay)();
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; if (tab === 'day') { day = D.today; weekOff = 0; } if (tab === 'life') L = null; render(); });
+  if (tab === 'life' && !L) { $('#main').innerHTML = '<p class="empty">Считаю баланс…</p>'; loadLife(); return; }
+  $('#main').innerHTML = ({ day: vDay, life: vLife, inbox: vInbox, goals: vGoals, done: vDone }[tab] || vDay)();
   bind();
 }
 
@@ -231,6 +254,59 @@ function vDay() {
         ${loose.length ? loose.map(liHtml).join('') : '<p class="empty">Пусто</p>'}</div>
       ${isToday ? inboxPeek() : ''}
     </aside></div>`;
+}
+
+async function loadLife() {
+  try { L = await call('balance'); } catch (e) { toast(e.message); L = { areas: [], checkins: [], memory: [] }; }
+  if (tab === 'life') render();
+}
+function wheelSvg(areas) {
+  const n = areas.length || 1, C = 220, R = 150;
+  const pt = (i, v) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [C + Math.cos(a) * R * v, C + Math.sin(a) * R * v]; };
+  const maxDone = Math.max(1, ...areas.map(a => a.done7));
+  const poly = f => areas.map((a, i) => pt(i, f(a)).map(x => x.toFixed(1)).join(',')).join(' ');
+  const rings = [0.2, 0.4, 0.6, 0.8, 1].map(r => `<polygon points="${areas.map((a, i) => pt(i, r).join(',')).join(' ')}" fill="none" stroke="#ebe7df"/>`).join('');
+  const spokes = areas.map((a, i) => { const [x, y] = pt(i, 1); return `<line x1="${C}" y1="${C}" x2="${x}" y2="${y}" stroke="#ebe7df"/>`; }).join('');
+  const hasRating = areas.some(a => a.rating);
+  const labels = areas.map((a, i) => { const [x, y] = pt(i, 1.18); const anc = Math.abs(x - C) < 10 ? 'middle' : x > C ? 'start' : 'end';
+    return `<text x="${x}" y="${y + 4}" text-anchor="${anc}">${esc(a.name.length > 16 ? a.name.slice(0, 15) + '…' : a.name)}</text>`; }).join('');
+  return `<svg class="wheel" viewBox="-60 0 560 440" role="img" aria-label="Колесо баланса по сферам">${rings}${spokes}
+    <polygon points="${poly(a => Math.max(a.done7 / maxDone, 0.04))}" fill="rgb(228 87 46 / .14)" stroke="#e4572e" stroke-width="2" stroke-dasharray="5 4"/>
+    ${hasRating ? `<polygon points="${poly(a => (a.rating || 0) / 5)}" fill="rgb(15 118 110 / .22)" stroke="#0f766e" stroke-width="2.5"/>` : ''}
+    ${labels}</svg>
+    <div class="leg">${hasRating ? '<span><i style="background:#0f766e"></i>Твоя оценка недели</span>' : ''}<span><i style="background:#e4572e"></i>Сделано за 7 дней</span></div>`;
+}
+function vLife() {
+  const A = L.areas || [], ck = L.checkins || [], mem = L.memory || [];
+  const t = D.today, ckMap = Object.fromEntries(ck.map(c => [c.day, c]));
+  const days = []; for (let i = 20; i >= 0; i--) days.push(addDays(t, -i));
+  const today = ckMap[t] || {};
+  const bars = (k, color) => days.map(d => { const v = (ckMap[d] || {})[k]; return `<div class="ckb" title="${fdate(d)}: ${v ?? '—'}" style="height:${v ? v * 8 : 3}px;background:${v ? color : 'var(--soft)'}"></div>`; }).join('');
+  const cards = A.map(a => {
+    const warn = (a.idle_days ?? 0) >= 10 || a.overdue > 0 || (a.rating && a.rating <= 2);
+    const trend = a.done7 > a.done_prev ? `<span class="up">↑</span>` : a.done7 < a.done_prev ? `<span class="down">↓</span>` : '';
+    return `<div class="ac ${warn ? 'warn' : ''}"><div class="n"><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}<span class="r">${a.rating ? a.rating + '/5' : '—'}</span></div>
+      <div class="s"><span>сделано <b>${a.done7}</b> ${trend}</span><span>открыто <b>${a.open}</b></span>${a.overdue ? `<span class="down">просрочено ${a.overdue}</span>` : ''}${(a.idle_days ?? 0) >= 10 ? `<span class="down">${a.idle_days} дн. тишины</span>` : ''}</div></div>`;
+  }).join('');
+  const rev = L.review;
+  return `<div class="lifeg">
+    <section class="card">${wheelSvg(A)}
+      <p class="empty" style="text-align:center">Оценки сфер бот спрашивает по воскресеньям вечером. Можно и сейчас: команда /rate в боте.</p></section>
+    <div class="side">
+      <div class="ai"><div class="k"><span>Обзор жизни от ИИ</span><button class="btn ${rev ? 'ghost' : ''}" id="revBtn" ${revBusy ? 'disabled' : ''}>${revBusy ? 'Думаю…' : rev ? 'Обновить' : 'Сделать обзор'}</button></div>
+        <p>${rev ? esc(rev) : 'ИИ посмотрит все сферы, чекины и переносы и скажет, что проседает и на чём сфокусироваться.'}</p></div>
+      <div class="areas">${cards}</div>
+    </div></div>
+    <div class="lifeg" style="margin-top:24px">
+      <section class="card"><div class="ch"><span>Энергия и настроение · 3 недели</span><span>${ck.length} чекинов</span></div>
+        <div class="cks"><span>энергия</span>${bars('energy', '#0f766e')}<span>настроение</span>${bars('mood', '#e4572e')}</div>
+        <div class="ckq"><span style="width:80px">Сегодня ⚡</span>${[1, 2, 3, 4, 5].map(n => `<button data-ck="energy" data-v="${n}" class="${today.energy === n ? 'on' : ''}" aria-label="Энергия ${n}">${n}</button>`).join('')}</div>
+        <div class="ckq"><span style="width:80px">Настроение</span>${['😩', '😕', '😐', '🙂', '😄'].map((e, i) => `<button data-ck="mood" data-v="${i + 1}" class="${today.mood === i + 1 ? 'on' : ''}" aria-label="Настроение ${i + 1}">${e}</button>`).join('')}</div>
+      </section>
+      <section class="card"><div class="ch"><span>Что ассистент о тебе знает</span><span>${mem.length}</span></div>
+        ${mem.length ? mem.map(m => `<div class="mem"><span>${esc(m.fact)}</span><button class="x" data-mdel="${m.id}" aria-label="Забыть">×</button></div>`).join('') : '<p class="empty">Пока пусто. Добавь пару фактов — советы станут точнее.</p>'}
+        <form id="memf" style="display:flex;gap:8px;margin-top:10px"><label class="sr" for="memi">Новый факт</label><input class="f" id="memi" style="flex:1" placeholder="Например: по субботам у меня группы до 14:00"><button class="btn" style="height:44px">Запомнить</button></form>
+      </section></div>`;
 }
 function liHtml(x) {
   const isDone = x.status === 'done', a = area(x.area_id);
@@ -288,6 +364,21 @@ function bind() {
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openTask(D.tasks.find(t => t.id === +b.dataset.edit)));
   document.querySelectorAll('[data-goal]').forEach(b => b.onclick = () => openGoal(D.goals.find(g => g.id === +b.dataset.goal)));
   const ag = $('#addGoal'); if (ag) ag.onclick = () => openGoal(null);
+  const rb = $('#revBtn'); if (rb) rb.onclick = async () => {
+    revBusy = true; render();
+    try { const r = await call('review'); L.review = r.text; } catch (er) { toast(er.message); }
+    revBusy = false; render();
+  };
+  document.querySelectorAll('[data-ck]').forEach(b => b.onclick = async () => {
+    try { await call('checkin_save', { day: D.today, [b.dataset.ck]: +b.dataset.v }); L = await call('balance'); render(); toast('Записал'); } catch (er) { toast(er.message); }
+  });
+  document.querySelectorAll('[data-mdel]').forEach(b => b.onclick = async () => {
+    try { const r = await call('memory_delete', { id: +b.dataset.mdel }); L.memory = r.memory; render(); } catch (er) { toast(er.message); }
+  });
+  const mf = $('#memf'); if (mf) mf.onsubmit = async e => {
+    e.preventDefault(); const v = $('#memi').value.trim(); if (!v) return;
+    try { const r = await call('memory_add', { fact: v }); L.memory = r.memory; render(); toast('Запомнил'); } catch (er) { toast(er.message); }
+  };
   const pb = $('#planBtn'); if (pb) pb.onclick = async () => {
     planBusy = true; render();
     try { const r = await call('plan'); D.plan = r.text; } catch (er) { toast(er.message); }
@@ -368,7 +459,7 @@ function openSettings() {
 }
 
 load();
-setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && document.activeElement?.id !== 'qi') load(); }, 60000);
+setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && !revBusy && tab !== 'life' && document.activeElement?.id !== 'qi') load(); }, 60000);
 }
 </script>
 </body>
