@@ -137,6 +137,13 @@ nav .set{margin-left:auto}
 .allp .li[draggable=true]:active{cursor:grabbing}
 .allp .scroll{max-height:440px;overflow-y:auto;margin-right:-8px;padding-right:8px}
 .tl.over{outline:2px dashed var(--teal);outline-offset:4px;border-radius:8px}
+.tl{cursor:cell;user-select:none;-webkit-user-select:none}
+.tsel{position:absolute;left:52px;right:0;border-radius:12px;background:color-mix(in srgb,var(--teal) 22%,#fff);border:2px solid var(--teal);pointer-events:none;z-index:3;padding:4px 10px;font-size:13px;font-weight:700;color:var(--teal-d)}
+.blk .rs{position:absolute;left:0;right:0;bottom:0;height:8px;cursor:ns-resize}
+.blk .rs::after{content:"";position:absolute;left:50%;bottom:2px;width:24px;height:3px;margin-left:-12px;border-radius:3px;background:currentColor;opacity:0;transition:opacity .15s}
+.blk:hover .rs::after{opacity:.35}
+.evrep{display:flex;gap:6px;flex-wrap:wrap}.evrep label{display:flex;align-items:center;gap:4px;font-size:14px;font-weight:500;color:var(--ink);border:1px solid var(--line);border-radius:99px;padding:6px 12px;cursor:pointer}
+.evrep input{margin:0}.evrep label:has(input:checked){background:var(--ink);color:#fff;border-color:var(--ink)}
 .dropmark{position:absolute;left:52px;right:0;height:2px;background:var(--teal);pointer-events:none;z-index:3}
 .dropmark span{position:absolute;left:0;top:-11px;background:var(--teal);color:#fff;font-size:11px;font-weight:700;padding:2px 6px;border-radius:6px}
 dialog{max-height:90vh;overflow:auto;border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
@@ -154,7 +161,7 @@ textarea.f{height:80px;padding:10px 12px;resize:vertical}
 .sr{position:absolute;left:-9999px}
 @media(prefers-reduced-motion:reduce){.toast{transition:none}}
 @media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}.side{order:-1}form.quick{margin-left:0;width:100%}.week{overflow-x:auto;width:100%}}
-@media(max-width:520px){h1{font-size:28px}.wd{width:44px;height:58px}.two{grid-template-columns:1fr}.goal{grid-template-columns:1fr}}
+@media(max-width:520px){h1{font-size:28px}.wd{width:44px;height:58px}.two:not(.keep){grid-template-columns:1fr}.goal{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -271,7 +278,7 @@ function vDay() {
     const top = (s - START * 60) / 60 * ROW + 2, h = Math.max((e - s) / 60 * ROW - 4, 34);
     return `<div class="blk ${x.status === 'done' ? 'done' : ''} p${x.priority}" data-edit="${x.id}" style="top:${top}px;height:${h}px;left:calc(52px + (100% - 52px) * ${li / nL});width:calc((100% - 52px) / ${nL} - 6px);background:color-mix(in srgb, ${esc(c)} 16%, #fff)">
       <button class="chk ${x.status === 'done' ? 'on' : ''}" data-done="${x.id}" aria-label="${x.status === 'done' ? 'Вернуть' : 'Готово'}">${x.status === 'done' ? '✓' : ''}</button>
-      <div style="color:var(--ink)"><div class="t">${esc(x.title)}</div>${h >= 44 ? `<div class="m">${hhmm(s)}–${hhmm(e)}${a ? ' · ' + esc(a.name) : ''}</div>` : ''}</div></div>`;
+      <div style="color:var(--ink)"><div class="t">${esc(x.title)}</div>${h >= 44 ? `<div class="m">${hhmm(s)}–${hhmm(e)}${a ? ' · ' + esc(a.name) : ''}</div>` : ''}</div>${x.status === 'todo' ? `<div class="rs" data-rs="${x.id}" data-s="${s}" title="Потяни, чтобы изменить длительность"></div>` : ''}</div>`;
   }).join('');
   const rts = (D.routines || []).filter(r => (r.days || []).includes(dow(day) || 7));
   const rtHtml = rts.map(r => { const s = Math.max(toMin(r.start), START * 60), e = Math.min(toMin(r.end), END * 60); if (e <= s) return '';
@@ -283,9 +290,9 @@ function vDay() {
   const planTxt = D.plan;
   return `<div class="grid">
     <section class="card">
-      <div class="ch"><span>День по часам</span><span class="${load > 480 ? 'hi' : ''}">${rtMin ? 'распорядок ' + fmin(rtMin) + ' · ' : ''}задачи ${fmin(load)}</span></div>
+      <div class="ch"><span>День по часам <button class="mini" id="newEv" style="margin-left:6px">+ событие</button></span><span class="${load > 480 ? 'hi' : ''}">${rtMin ? 'распорядок ' + fmin(rtMin) + ' · ' : ''}задачи ${fmin(load)}</span></div>
       <div class="tl">${hours.join('')}${rtHtml}${blocks}${nowLine}</div>
-      ${!timed.length ? '<p class="empty">Задач со временем нет. Напиши, например: «в 16:00 позвонить в банк».</p>' : ''}
+      ${!timed.length ? '<p class="empty">Нажми на нужный час (или потяни мышкой от начала до конца), чтобы добавить событие — как в Google Календаре.</p>' : ''}
       ${!(D.routines || []).length ? '<p class="empty">Добавь распорядок — напиши боту «работа пн–сб с 11 до 19» или открой Настройки.</p>' : ''}
     </section>
     <aside class="side">
@@ -490,7 +497,80 @@ function bindAllPanel() {
     const id = +e.dataTransfer.getData('text/plain'); if (!id) return; const m = at(e);
     try { await call('task_update', { id, patch: { due_date: day, due_time: hhmm(m), in_progress: false } }); toast(`Поставил на ${hhmm(m)}`); load(); } catch (er) { toast(er.message); } };
   // блоки на шкале тоже можно двигать по времени
-  document.querySelectorAll('.blk').forEach(b => { b.draggable = true; b.ondragstart = e => { e.dataTransfer.setData('text/plain', b.dataset.edit); }; });
+  let resizing = false;
+  document.querySelectorAll('.blk').forEach(b => { b.draggable = true; b.ondragstart = e => { if (resizing) { e.preventDefault(); return; } e.dataTransfer.setData('text/plain', b.dataset.edit); }; });
+  bindTimeline(tl, at, () => resizing, v => { resizing = v; });
+}
+// ---- события как в календаре: клик/выделение по шкале, растягивание блока ----
+function bindTimeline(tl, at, isResizing, setResizing) {
+  const ROWH = 52, y = m => (m - START * 60) / 60 * ROWH;
+  const empty = el => el === tl || el.classList.contains('hr') || el.parentElement?.classList.contains('hr');
+  let sel = null, a0 = 0, moved = false;
+  tl.onpointerdown = e => {
+    if (e.button !== 0 || !empty(e.target)) return;
+    a0 = Math.floor(at(e) / 15) * 15; moved = false;
+    if (e.pointerType !== 'mouse') return; // на телефоне — просто тап (click ниже), чтобы не мешать прокрутке
+    sel = document.createElement('div'); sel.className = 'tsel'; tl.appendChild(sel);
+    const draw = (b) => { const s = Math.min(a0, b), en = Math.max(a0 + 15, b + 15);
+      sel.style.top = y(s) + 'px'; sel.style.height = Math.max(y(en) - y(s), 18) + 'px'; sel.textContent = `${hhmm(s)}–${hhmm(en)}`; return [s, en]; };
+    let rng = draw(a0);
+    tl.setPointerCapture(e.pointerId);
+    tl.onpointermove = ev => { const b = Math.floor(at(ev) / 15) * 15; if (b !== a0) moved = true; rng = draw(b); };
+    tl.onpointerup = () => { tl.onpointermove = tl.onpointerup = null; sel?.remove(); sel = null;
+      const [s, en] = moved ? rng : [Math.floor(a0 / 30) * 30, Math.floor(a0 / 30) * 30 + 60];
+      newEvent(day, s, en); };
+  };
+  tl.onclick = e => { if (sel || !empty(e.target)) return;
+    if (e.pointerType === 'mouse' || (e.detail && matchMedia('(pointer:fine)').matches)) return; // мышью обрабатываем в pointerup
+    const s = Math.floor(at(e) / 30) * 30; newEvent(day, s, s + 60); };
+  const nb = $('#newEv'); if (nb) nb.onclick = () => { const n = Math.ceil(Math.max(nowMin(), START * 60) / 30) * 30; newEvent(day, day === D.today ? n : 10 * 60, (day === D.today ? n : 10 * 60) + 60); };
+  // растягивание нижнего края блока
+  document.querySelectorAll('[data-rs]').forEach(h => h.onpointerdown = e => {
+    e.stopPropagation(); e.preventDefault(); setResizing(true);
+    const b = h.closest('.blk'), s = +h.dataset.s, id = +h.dataset.rs; let en = s;
+    h.setPointerCapture(e.pointerId);
+    h.onpointermove = ev => { en = Math.max(s + 15, Math.round(at(ev) / 15) * 15); b.style.height = Math.max(y(en) - y(s) - 4, 20) + 'px';
+      const m = b.querySelector('.m'); if (m) m.textContent = `${hhmm(s)}–${hhmm(en)}`; };
+    h.onpointerup = async () => { h.onpointermove = h.onpointerup = null; setTimeout(() => setResizing(false), 50);
+      if (en > s) { try { await call('task_update', { id, patch: { estimate_min: en - s } }); toast(`${hhmm(s)}–${hhmm(en)}`); } catch (er) { toast(er.message); } load(); } };
+    h.onclick = ev => ev.stopPropagation();
+  });
+}
+function newEvent(d, s, en) {
+  const wd = dow(d) || 7, WDN = ['', 'Каждый понедельник', 'Каждый вторник', 'Каждую среду', 'Каждый четверг', 'Каждую пятницу', 'Каждую субботу', 'Каждое воскресенье'];
+  $('#dlgForm').innerHTML = `<h3>Новое событие</h3>
+    <label>Название<input class="f" name="title" required placeholder="Например: созвон с родителями" autocomplete="off"></label>
+    <div class="two"><label>Дата<input class="f" type="date" name="date" value="${esc(d)}"></label>
+    <label>Сфера<select class="f" name="area_id"><option value="">—</option>${D.areas.map(a => `<option value="${a.id}" ${a.id === fArea ? 'selected' : ''}>${esc(a.emoji || '')} ${esc(a.name)}</option>`).join('')}</select></label></div>
+    <div class="two keep"><label>Начало<input class="f" type="time" name="start" step="300" value="${hhmm(s)}" required></label>
+    <label>Конец<input class="f" type="time" name="end" step="300" value="${hhmm(Math.min(en, 24 * 60 - 1))}" required></label></div>
+    <div><div style="font-size:13px;font-weight:700;color:var(--mut);margin-bottom:6px">Повтор</div><div class="evrep">
+      <label><input type="radio" name="rep" value="" checked>Один раз</label>
+      <label><input type="radio" name="rep" value="w">${WDN[wd]}</label>
+      <label><input type="radio" name="rep" value="wd">По будням</label>
+      <label><input type="radio" name="rep" value="all">Каждый день</label></div>
+      <p class="empty" id="repHint" style="margin:6px 0 0;display:none">Повторяющееся событие попадёт в распорядок — будет видно на шкале каждый такой день.</p></div>
+    <div class="acts"><span></span><span style="display:flex;gap:8px"><button type="button" class="btn ghost" id="cancel" style="height:44px">Отмена</button><button class="btn" style="height:44px">Добавить</button></span></div>`;
+  const dlg = $('#dlg'); dlg.showModal(); $('#dlgForm [name=title]').focus();
+  $('#cancel').onclick = () => dlg.close();
+  $('#dlgForm').onchange = () => { $('#repHint').style.display = $('#dlgForm [name=rep]:checked').value ? '' : 'none'; };
+  $('#dlgForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData($('#dlgForm')).entries());
+    const sm = toMin(f.start), em = toMin(f.end); if (!(em > sm)) { toast('Конец должен быть позже начала'); return; }
+    const area_id = f.area_id ? +f.area_id : null, w = dow(f.date) || 7;
+    try {
+      if (f.rep) {
+        const days = f.rep === 'w' ? [w] : f.rep === 'wd' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 7];
+        await call('routine_save', { routine: { title: f.title.trim(), area_id, days, start_time: f.start, end_time: f.end } });
+        toast('Добавил в распорядок');
+      } else {
+        await call('task_add', { task: { title: f.title.trim(), area_id, due_date: f.date, due_time: f.start, estimate_min: em - sm, priority: 3 } });
+        toast(`Событие ${f.start}–${f.end}`);
+      }
+      dlg.close(); load();
+    } catch (er) { toast(er.message); }
+  };
 }
 function liHtml(x) {
   const isDone = x.status === 'done', a = area(x.area_id);
