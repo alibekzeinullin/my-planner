@@ -108,6 +108,11 @@ nav .set{margin-left:auto}
 .bfil{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .chip{height:36px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
 .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip.addc{width:36px;justify-content:center;padding:0;font-size:20px;font-weight:500;border-style:dashed}
+.aform{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:14px}
+.aform .f{height:42px;flex:1 1 180px}.aform .f.em{flex:0 0 64px;text-align:center}
+.aform input[type=color]{width:42px;height:42px;border:1px solid var(--line);border-radius:10px;padding:2px;background:var(--card)}
+.aform .btn{height:42px}
 .board{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:14px;overflow-x:auto;padding-bottom:12px;scroll-snap-type:x proximity}
 .col{background:var(--soft);border-radius:18px;padding:12px;display:flex;flex-direction:column;min-height:420px;scroll-snap-align:start}
 .col h3{margin:2px 4px 10px;font-size:14px;display:flex;justify-content:space-between;align-items:baseline}
@@ -169,7 +174,7 @@ const MONN = ['Январь','Февраль','Март','Апрель','Май'
 const PRI = {1:'Срочно',2:'Важно',3:'Обычно',4:'Когда-нибудь'};
 const REC = {'':'Не повторять',daily:'Каждый день',weekdays:'По будням',weekly:'Каждую неделю',biweekly:'Раз в 2 недели',monthly:'Каждый месяц'};
 
-let SORT = null, fArea = 0;
+let SORT = null, fArea = 0, aEdit = null;
 let KEY = null, D = null, tab = 'day', day = null, weekOff = 0, planBusy = false, L = null, revBusy = false;
 try { KEY = localStorage.getItem('planner_key'); } catch (e) {}
 const hk = location.hash.match(/key=([a-f0-9]+)/);
@@ -376,10 +381,19 @@ function cardHtml(x) {
 }
 function vBoard() {
   const cols = boardCols();
-  const used = new Set(D.tasks.filter(x => x.status !== 'cancelled').map(x => x.area_id));
   const chips = [`<button class="chip ${!fArea ? 'on' : ''}" data-fa="0">Все сферы</button>`]
-    .concat(D.areas.filter(a => used.has(a.id)).map(a => `<button class="chip ${fArea === a.id ? 'on' : ''}" data-fa="${a.id}"><span class="dot" style="background:${esc(a.color)};margin:0"></span>${esc(a.name)}</button>`));
-  return `<div class="bfil">${chips.join('')}</div><div class="board">${cols.map(c => `<section class="col ${c.k}"><h3><span>${c.name} <small>${c.items.length}</small></span><small>${c.hint}</small></h3>
+    .concat(D.areas.map(a => `<button class="chip ${fArea === a.id ? 'on' : ''}" data-fa="${a.id}"><span class="dot" style="background:${esc(a.color)};margin:0"></span>${esc(a.emoji || '')} ${esc(a.name)}</button>`))
+    .concat(fArea ? [`<button class="chip" data-aedit="${fArea}" title="Изменить сферу">✎</button>`] : [])
+    .concat([`<button class="chip addc" data-aedit="new" title="Добавить сферу" aria-label="Добавить сферу">+</button>`]);
+  const ea = aEdit && aEdit !== 'new' ? area(aEdit) : null;
+  const form = aEdit ? `<form class="aform" id="aform">
+      <label class="sr" for="an">Название сферы</label><input class="f" id="an" placeholder="Название сферы" value="${esc(ea ? ea.name : '')}" required autocomplete="off">
+      <label class="sr" for="ae">Эмодзи</label><input class="f em" id="ae" placeholder="🙂" value="${esc(ea ? ea.emoji || '' : '')}" maxlength="4">
+      <label class="sr" for="ac">Цвет</label><input type="color" id="ac" value="${esc(ea ? ea.color : '#0f766e')}">
+      <button class="btn">${ea ? 'Сохранить' : 'Добавить'}</button>
+      ${ea ? '<button type="button" class="btn ghost" id="aarch">Убрать сферу</button>' : ''}
+      <button type="button" class="btn ghost" id="acancel">Отмена</button></form>` : '';
+  return `<div class="bfil">${chips.join('')}</div>${form}<div class="board">${cols.map(c => `<section class="col ${c.k}"><h3><span>${c.name} <small>${c.items.length}</small></span><small>${c.hint}</small></h3>
     <div class="drop" data-col="${c.k}">${c.items.map(cardHtml).join('')}</div>
     ${c.k !== 'done' ? `<form class="kadd" data-add="${c.k}"><label class="sr" for="ka-${c.k}">Новая задача в «${c.name}»</label><input id="ka-${c.k}" placeholder="+ задача" autocomplete="off"></form>` : ''}</section>`).join('')}</div>
     <p class="empty">Перетаскивай карточки между колонками: дата и статус поменяются сами. Нажми на карточку, чтобы открыть.</p>`;
@@ -413,7 +427,22 @@ async function moveCard(id, from, to) {
   await load();
 }
 async function bindBoard() {
-  document.querySelectorAll('[data-fa]').forEach(b => b.onclick = () => { fArea = +b.dataset.fa; render(); });
+  document.querySelectorAll('[data-fa]').forEach(b => b.onclick = () => { fArea = +b.dataset.fa; aEdit = null; render(); });
+  document.querySelectorAll('[data-aedit]').forEach(b => b.onclick = () => { aEdit = b.dataset.aedit === 'new' ? 'new' : +b.dataset.aedit; render(); const n = $('#an'); if (n) n.focus(); });
+  const af = $('#aform');
+  if (af) {
+    const ea = aEdit !== 'new' ? area(aEdit) : null;
+    $('#acancel').onclick = () => { aEdit = null; render(); };
+    af.onsubmit = async e => {
+      e.preventDefault(); const name = $('#an').value.trim(); if (!name) return;
+      try { await call('area_save', { area: { id: ea ? ea.id : undefined, name, emoji: $('#ae').value.trim() || '📁', color: $('#ac').value } });
+        toast(ea ? 'Сфера обновлена' : 'Сфера добавлена'); aEdit = null; await load(); } catch (er) { toast(er.message); }
+    };
+    if ($('#aarch')) $('#aarch').onclick = async () => {
+      if (!confirm(`Убрать сферу «${ea.name}»? Задачи останутся, просто без этой сферы в списке.`)) return;
+      try { await call('area_save', { area: { ...ea, archived: true } }); fArea = 0; aEdit = null; toast('Сфера убрана'); await load(); } catch (er) { toast(er.message); }
+    };
+  }
   document.querySelectorAll('[data-add]').forEach(f => f.onsubmit = async e => {
     e.preventDefault(); const inp = f.querySelector('input'), v = inp.value.trim(); if (!v) return;
     const task = { title: v, priority: 3, area_id: fArea || null, ...colPatch(f.dataset.add, {}) };
@@ -638,7 +667,7 @@ function openSettings(keep) {
 }
 
 load();
-setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && !revBusy && tab !== 'life' && !document.querySelector('.chosen') && !(document.activeElement?.id || '').startsWith('ka-') && document.activeElement?.id !== 'srch' && document.activeElement?.id !== 'qi') load(); }, 60000);
+setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && !revBusy && tab !== 'life' && !aEdit && !document.querySelector('.chosen') && !(document.activeElement?.id || '').startsWith('ka-') && document.activeElement?.id !== 'srch' && document.activeElement?.id !== 'qi') load(); }, 60000);
 }
 </script>
 </body>
