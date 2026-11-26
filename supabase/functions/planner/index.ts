@@ -12,6 +12,7 @@ const MODEL_FAST = Deno.env.get("CLAUDE_MODEL_FAST") ?? "claude-haiku-5-5";
 const MODEL_SMART = Deno.env.get("CLAUDE_MODEL_SMART") ?? "claude-sonnet-5-5";
 const OK = Deno.env.get("OPENAI_API_KEY") ?? "";
 const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5.4-mini";
+const OPENAI_MODEL_SMART = Deno.env.get("OPENAI_MODEL_SMART") ?? "gpt-5.4";
 const HAS_AI = !!(AK || OK);
 const FN_URL = `${Deno.env.get("SUPABASE_URL")}/functions/v1/planner`;
 
@@ -308,10 +309,13 @@ async function claude(model: string, system: string, messages: any[], tools?: an
   return j;
 }
 
-let OPENAI_WORKING_MODEL: string | null = null;
+const OPENAI_WORKING: Record<string, string> = {};
 // deno-lint-ignore no-explicit-any
-async function openai(system: string, user: string, tool?: any, max_tokens = 1500) {
-  const models = OPENAI_WORKING_MODEL ? [OPENAI_WORKING_MODEL] : [...new Set([OPENAI_MODEL, "gpt-5.4-mini", "gpt-4.1-mini", "gpt-4o-mini"])];
+async function openai(tier: "fast" | "smart", system: string, user: string, tool?: any, max_tokens = 1500) {
+  const list = tier === "smart"
+    ? [OPENAI_MODEL_SMART, "gpt-5.4", "gpt-4.1", "gpt-4o", OPENAI_MODEL, "gpt-4.1-mini"]
+    : [OPENAI_MODEL, "gpt-5.4-mini", "gpt-4.1-mini", "gpt-4o-mini"];
+  const models = OPENAI_WORKING[tier] ? [OPENAI_WORKING[tier]] : [...new Set(list)];
   let lastErr = "";
   for (const model of models) {
     // deno-lint-ignore no-explicit-any
@@ -335,7 +339,7 @@ async function openai(system: string, user: string, tool?: any, max_tokens = 150
       if (r.status === 404 || String(j?.error?.code ?? "").includes("model")) continue; // модели нет — пробуем следующую
       throw new Error(lastErr);
     }
-    OPENAI_WORKING_MODEL = model;
+    OPENAI_WORKING[tier] = model;
     const msg = j.choices?.[0]?.message ?? {};
     const args = msg.tool_calls?.[0]?.function?.arguments;
     return { input: args ? JSON.parse(args) : null, text: msg.content ?? "" };
@@ -355,7 +359,7 @@ async function llm(tier: "fast" | "smart", system: string, user: string, tool?: 
     const text = j.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
     return { input, text };
   }
-  return await openai(system, user, tool, max_tokens);
+  return await openai(tier, system, user, tool, max_tokens);
 }
 
 const ACT_TOOL = {
@@ -418,7 +422,24 @@ function nowLine() {
 
 type Out = { reply: string; sends: { text: string; extra: Record<string, unknown> }[]; plan?: boolean; balance?: boolean };
 
-async function processText(text: string, source = "bot"): Promise<Out> {
+async function chatLog(role: string, text: string, ids: number[] = []) {
+  try {
+    await sql`insert into life.chat_log(role, text, task_ids) values (${role}, ${text.slice(0, 1500)}, ${ids})`;
+  } catch (e) { console.error("chatlog", e); }
+}
+async function recentDialog() {
+  try {
+    return await sql`select role, text, task_ids, to_char(created_at + make_interval(hours => ${OFF}), 'HH24:MI') as at
+      from life.chat_log where created_at > now() - interval '3 hours' order by id desc limit 10`;
+  } catch { return []; }
+}
+const sameTitle = (a: string, b: string) => {
+  const n = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const x = n(a), y = n(b);
+  return !!x && !!y && (x === y || x.startsWith(y) || y.startsWith(x));
+};
+
+async function processText(text: string, source = "bot", replyTaskId: number | null = null): Promise<Out> {
   const out: Out = { reply: "", sends: [] };
   if (!HAS_AI) {
     const t = await addTask({ title: text, priority: 3 }, source);
@@ -426,6 +447,7 @@ async function processText(text: string, source = "bot"): Promise<Out> {
     return out;
   }
   const { areas, tasks, goals, memory, routines } = await context();
+  const dialog = (await recentDialog()).reverse();
   const today = todayStr();
   const days = Array.from({ length: 8 }, (_, i) => {
     const d = addDays(today, i);
@@ -460,25 +482,55 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
 - "Запомни/учти/знай, что ..." или явный устойчивый факт о жизни (режим, люди, работа, предпочтения) → remember (fact кратко, от третьего лица). Обычные задачи НЕ запоминай. "Забудь ..." → forget с memory_id.
 - "Как мой баланс", "что проседает", "обзор жизни/недели" → balance.
 - Учитывай факты о пользователе при выборе сферы, времени и приоритета.
-- reply: 1 короткая фраза, по делу, без воды. Для show/plan reply можно оставить пустым. На общие вопросы отвечай в reply кратко.`;
+- reply: 1 короткая фраза, по делу, без воды. Для show/plan reply можно оставить пустым. На общие вопросы отвечай в reply кратко.
+
+САМОЕ ВАЖНОЕ — контекст диалога:
+- Ниже дан недавний диалог с id задач, которые бот только что создал или менял. Если новое сообщение уточняет или исправляет предыдущее («нет, в субботу», «не в 11 а в 10», «это по работе», «напомни за час», «добавь туда ещё…», «отмени», «не так», «я имел в виду…») — это update (или delete) ТОЙ ЖЕ задачи по её id, а НЕ новая задача.
+- «Напомни в 18:00» / «напомни за час» без нового дела → update последней задачи (remind_at), не add.
+- Если пользователь ответил на сообщение бота про задачу — оно про задачу с id из «Ответ на задачу».
+- Не создавай дубль: если такая задача уже есть в открытых (тот же смысл, тот же день) — update её.
+- Подзадачи кладутся только в subtasks родителя; не добавляй их же отдельными add.
+- Название задачи — короткое и чистое, как в списке дел (3–8 слов), без даты/времени/«напомни». Детали — в notes.
+- Если сообщение правда непонятно (нельзя понять даже что за дело) — ничего не делай, задай в reply один короткий уточняющий вопрос. Но не переспрашивай по мелочам: дата/сфера неясны — просто оставь пустыми.
+- Встречи/созвоны с клиентами, родителями учеников, менторство — это работа, если по смыслу не личное.`;
+  const dialogTxt = dialog.length
+    ? dialog.map((d) => `${d.at} ${d.role === "user" ? "Пользователь" : "Бот"}: ${d.text}${d.task_ids?.length ? ` [задачи: ${d.task_ids.join(", ")}]` : ""}`).join("\n")
+    : "(нет)";
+  const replyTxt = replyTaskId ? `\nОтвет на задачу: id ${replyTaskId}` : "";
+  const userMsg = `Недавний диалог:\n${dialogTxt}${replyTxt}\n\nНовое сообщение пользователя:\n${text}`;
 
   // deno-lint-ignore no-explicit-any
   let input: any;
   try {
-    input = (await llm("fast", system, text, ACT_TOOL)).input;
+    input = (await llm("smart", system, userMsg, ACT_TOOL, 2000)).input;
   } catch (e) {
     console.error(e);
     const t = await addTask({ title: text, priority: 3 }, source);
     out.sends.push({ text: `📝 Записал как есть (ИИ сейчас недоступен):\n\n${fmtTask(t)}`, extra: { reply_markup: taskKb(t.id) } });
     return out;
   }
+  await chatLog("user", text, replyTaskId ? [replyTaskId] : []);
   if (!input) return { reply: "Не понял 🤔 Попробуй иначе", sends: [] };
   out.reply = input.reply ?? "";
   const ids = new Set(tasks.map((t) => t.id));
   const added: Task[] = [];
-  for (const a of input.actions ?? []) {
+  const touched: number[] = [];
+  // deno-lint-ignore no-explicit-any
+  const acts: any[] = input.actions ?? [];
+  // убрать отдельные add, которые повторяют подзадачи другого add
+  const subTitles = acts.filter((a) => a.type === "add").flatMap((a) => (a.subtasks ?? []).map(String));
+  const clean = acts.filter((a) => !(a.type === "add" && !(a.subtasks?.length) && subTitles.some((st) => sameTitle(st, a.title ?? ""))));
+  for (const a of clean) {
+    if (a.id) touched.push(+a.id);
     try {
-      if (a.type === "add" && a.title) added.push(await addTask(a, source));
+      if (a.type === "add" && a.title) {
+        const dup = tasks.find((t) => !t.parent_id && sameTitle(t.title, a.title) && (t.due_date ?? null) === (a.due_date || null));
+        if (dup) {
+          const t = await updateTask(dup.id, a);
+          touched.push(dup.id);
+          if (t) out.sends.push({ text: `✏️ Такая уже есть — обновил:\n\n${fmtTask(t)}`, extra: { reply_markup: taskKb(t.id) } });
+        } else added.push(await addTask(a, source));
+      }
       else if (a.type === "complete" && ids.has(a.id)) out.sends.push({ text: esc(await completeTask(a.id)), extra: {} });
       else if (a.type === "update" && ids.has(a.id)) {
         const t = await updateTask(a.id, a);
@@ -520,6 +572,10 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
   } else if (added.length > 1) {
     out.sends.unshift(listMsg(`📝 Записал ${added.length}`, added));
   }
+  const allIds = [...new Set([...touched, ...added.map((t) => t.id)])];
+  const summary = [out.reply, ...added.map((t) => `создал «${t.title}»${t.due_date ? " на " + t.due_date : ""}${t.due_time ? " " + t.due_time : ""}`),
+    ...clean.filter((a) => a.type !== "add").map((a) => `${a.type}${a.id ? " #" + a.id : ""}`)].filter(Boolean).join("; ");
+  await chatLog("bot", summary || "(без действий)", allIds);
   return out;
 }
 
@@ -992,7 +1048,14 @@ async function onUpdate(u: any, s: S) {
   }
 
   await tg("sendChatAction", { chat_id: chat, action: "typing" });
-  const out = await processText(text, "bot");
+  // если ответил на сообщение бота с кнопками задачи — берём её id
+  let replyTaskId: number | null = null;
+  const rkb = m.reply_to_message?.reply_markup?.inline_keyboard ?? [];
+  for (const b of rkb.flat()) {
+    const mm = /^(d|h|t|x|t0|sp):(\d+)$/.exec(b.callback_data ?? "");
+    if (mm) { replyTaskId = +mm[2]; break; }
+  }
+  const out = await processText(text, "bot", replyTaskId);
   if (out.reply) await send(chat, esc(out.reply));
   for (const x of out.sends) await send(chat, x.text, x.extra);
   if (out.plan) await sendPlan(chat, "manual");

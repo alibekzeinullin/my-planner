@@ -351,7 +351,8 @@ function vLife() {
 
 function boardCols() {
   const t = D.today, weekAgo = addDays(t, -7);
-  const all = D.tasks.filter(x => !x.parent_id && x.status !== 'cancelled' && (!fArea || x.area_id === fArea));
+  // повторяющиеся дела — это расписание: на доске только в день, когда подошёл их срок
+  const all = D.tasks.filter(x => !x.parent_id && x.status !== 'cancelled' && (!fArea || x.area_id === fArea) && !(x.recurrence && x.status === 'todo' && x.due_date && x.due_date > t));
   const todo = all.filter(x => x.status === 'todo');
   const byTime = (a, b) => (a.due_time || '99').localeCompare(b.due_time || '99') || a.priority - b.priority;
   return [
@@ -430,7 +431,7 @@ async function bindBoard() {
 let SRCH = '';
 function allPanel() {
   const t = D.today;
-  const rest = open().filter(x => x.due_date !== day && !(day === t && x.due_date && x.due_date < t));
+  const rest = open().filter(x => x.due_date !== day && !(day === t && x.due_date && x.due_date < t) && !(x.recurrence && x.due_date));
   const nodate = rest.filter(x => !x.due_date).sort((a, b) => a.priority - b.priority);
   const dated = rest.filter(x => x.due_date).sort((a, b) => a.due_date.localeCompare(b.due_date));
   const row = x => { const a = area(x.area_id);
