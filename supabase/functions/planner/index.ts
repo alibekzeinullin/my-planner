@@ -79,7 +79,7 @@ async function send(chat: string | number, text: string, extra: Record<string, u
 // ---------- задачи ----------
 const TASK_COLS = sql`t.id, t.title, t.notes, t.area_id, t.goal_id, t.parent_id, t.priority, t.status,
   t.due_date::text as due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.remind_at, t.reminded,
-  t.estimate_min, t.recurrence, t.postponed_count, t.created_at, t.done_at, t.source,
+  t.estimate_min, t.recurrence, t.postponed_count, t.created_at, t.done_at, t.source, t.in_progress,
   a.name as area, a.emoji as area_emoji`;
 
 // deno-lint-ignore no-explicit-any
@@ -224,7 +224,7 @@ async function completeTask(id: number): Promise<string> {
   const t = await getTask(id);
   if (!t) return "Задача не найдена";
   if (t.status === "done") return `Уже было готово: ${t.title}`;
-  await sql`update life.tasks set status = 'done', done_at = now() where id = ${id}`;
+  await sql`update life.tasks set status = 'done', done_at = now(), in_progress = false where id = ${id}`;
   await logEvent("done", id);
   let extra = "";
   if (t.recurrence) {
@@ -244,7 +244,7 @@ async function completeTask(id: number): Promise<string> {
 }
 
 const EDITABLE = ["title", "notes", "area_id", "goal_id", "priority", "due_date", "due_time",
-  "estimate_min", "recurrence", "status", "parent_id"];
+  "estimate_min", "recurrence", "status", "parent_id", "in_progress"];
 // deno-lint-ignore no-explicit-any
 async function updateTask(id: number, f: any): Promise<Task | null> {
   const t = await getTask(id);

@@ -105,6 +105,35 @@ nav .set{margin-left:auto}
 .mem:first-of-type{border-top:0}.mem span{flex:1}
 .x{width:32px;height:32px;border:0;border-radius:8px;background:var(--soft);font-size:16px;line-height:1}
 @media(max-width:900px){.lifeg{grid-template-columns:minmax(0,1fr)}.cks{grid-template-columns:56px repeat(21,minmax(0,1fr))}}
+.bfil{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.chip{height:36px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--card);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.board{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:14px;overflow-x:auto;padding-bottom:12px;scroll-snap-type:x proximity}
+.col{background:var(--soft);border-radius:18px;padding:12px;display:flex;flex-direction:column;min-height:420px;scroll-snap-align:start}
+.col h3{margin:2px 4px 10px;font-size:14px;display:flex;justify-content:space-between;align-items:baseline}
+.col h3 small{color:var(--mut);font-weight:600}
+.col.doing{background:#eaf4f2}.col.today{background:#fdf1ec}
+.drop{flex:1;display:flex;flex-direction:column;gap:8px;min-height:80px}
+.kc{background:var(--card);border-radius:14px;padding:10px 12px;border:1px solid var(--line);cursor:grab;touch-action:manipulation;user-select:none}
+.kc:active{cursor:grabbing}
+.kc .t{font-weight:600;font-size:14px;line-height:1.3}
+.kc .m{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--mut);margin-top:6px;align-items:center}
+.kc.done .t{text-decoration:line-through;color:var(--mut)}
+.kc .p1{color:var(--red);font-weight:700}
+.kc .ov{color:var(--red);font-weight:700}
+.kghost{opacity:.35}.chosen{box-shadow:0 10px 30px rgb(0 0 0/.18);transform:rotate(1deg)}
+.kadd{margin-top:8px;display:flex;gap:6px}
+.kadd input{flex:1;height:38px;border:1px dashed #cfcac0;border-radius:10px;background:transparent;padding:0 10px;font-size:14px}
+.kadd input:focus{background:var(--card);border-style:solid}
+@media(max-width:900px){.board{grid-template-columns:repeat(5,minmax(78vw,1fr))}}
+.allp .srch{width:100%;height:40px;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:0 12px;font-size:14px;margin:2px 0 8px}
+.allp .grp{font-size:12px;font-weight:700;color:var(--mut);margin:10px 0 2px}
+.allp .li{cursor:grab}
+.allp .li[draggable=true]:active{cursor:grabbing}
+.allp .scroll{max-height:440px;overflow-y:auto;margin-right:-8px;padding-right:8px}
+.tl.over{outline:2px dashed var(--teal);outline-offset:4px;border-radius:8px}
+.dropmark{position:absolute;left:52px;right:0;height:2px;background:var(--teal);pointer-events:none;z-index:3}
+.dropmark span{position:absolute;left:0;top:-11px;background:var(--teal);color:#fff;font-size:11px;font-weight:700;padding:2px 6px;border-radius:6px}
 dialog{max-height:90vh;overflow:auto;border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 24px);background:var(--card);color:var(--ink);box-shadow:0 20px 60px rgb(0 0 0/.25)}
 dialog::backdrop{background:rgb(23 32 31/.45)}
 .dlg{padding:22px;display:grid;gap:12px}
@@ -140,6 +169,7 @@ const MONN = ['Январь','Февраль','Март','Апрель','Май'
 const PRI = {1:'Срочно',2:'Важно',3:'Обычно',4:'Когда-нибудь'};
 const REC = {'':'Не повторять',daily:'Каждый день',weekdays:'По будням',weekly:'Каждую неделю',biweekly:'Раз в 2 недели',monthly:'Каждый месяц'};
 
+let SORT = null, fArea = 0;
 let KEY = null, D = null, tab = 'day', day = null, weekOff = 0, planBusy = false, L = null, revBusy = false;
 try { KEY = localStorage.getItem('planner_key'); } catch (e) {}
 const hk = location.hash.match(/key=([a-f0-9]+)/);
@@ -188,7 +218,7 @@ function render() {
   const all = open(), t = D.today;
   const [y, m, d] = day.split('-');
   const inboxN = all.filter(x => !x.due_date).length;
-  const tabs = [['day', 'День', ''], ['life', 'Баланс', ''], ['inbox', 'Без даты', inboxN || ''], ['goals', 'Цели и мечты', ''], ['done', 'Сделано', '']];
+  const tabs = [['day', 'День', ''], ['board', 'Доска', ''], ['life', 'Баланс', ''], ['inbox', 'Без даты', inboxN || ''], ['goals', 'Цели и мечты', ''], ['done', 'Сделано', '']];
   $('#app').innerHTML = `<div class="wrap"><header>
     <div><div class="mon">${MONN[+m - 1]} ${y}</div><h1>${WDF[dow(day)]}, ${+d}</h1></div>
     <div class="week">
@@ -212,7 +242,7 @@ function render() {
   document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { day = b.dataset.day; tab = 'day'; render(); });
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; if (tab === 'day') { day = D.today; weekOff = 0; } if (tab === 'life') L = null; render(); });
   if (tab === 'life' && !L) { $('#main').innerHTML = '<p class="empty">Считаю баланс…</p>'; loadLife(); return; }
-  $('#main').innerHTML = ({ day: vDay, life: vLife, inbox: vInbox, goals: vGoals, done: vDone }[tab] || vDay)();
+  $('#main').innerHTML = ({ day: vDay, board: vBoard, life: vLife, inbox: vInbox, goals: vGoals, done: vDone }[tab] || vDay)();
   bind();
 }
 
@@ -262,7 +292,7 @@ function vDay() {
         <p>${planTxt ? esc(planTxt) : 'Нажми — ИИ посмотрит задачи, просрочку и нагрузку и предложит порядок дня. Утром в 8:00 план приходит сам.'}</p></div>` : ''}
       <div class="card"><div class="ch"><span>Без времени${isToday ? '' : ' · ' + fdate(day)}</span><span>${loose.filter(x => x.status === 'todo').length}</span></div>
         ${loose.length ? loose.map(liHtml).join('') : '<p class="empty">Пусто</p>'}</div>
-      ${isToday ? inboxPeek() : ''}
+      ${allPanel()}
     </aside></div>`;
 }
 
@@ -317,6 +347,120 @@ function vLife() {
         ${mem.length ? mem.map(m => `<div class="mem"><span>${esc(m.fact)}</span><button class="x" data-mdel="${m.id}" aria-label="Забыть">×</button></div>`).join('') : '<p class="empty">Пока пусто. Добавь пару фактов — советы станут точнее.</p>'}
         <form id="memf" style="display:flex;gap:8px;margin-top:10px"><label class="sr" for="memi">Новый факт</label><input class="f" id="memi" style="flex:1" placeholder="Например: по субботам у меня группы до 14:00"><button class="btn" style="height:44px">Запомнить</button></form>
       </section></div>`;
+}
+
+function boardCols() {
+  const t = D.today, weekAgo = addDays(t, -7);
+  const all = D.tasks.filter(x => !x.parent_id && x.status !== 'cancelled' && (!fArea || x.area_id === fArea));
+  const todo = all.filter(x => x.status === 'todo');
+  const byTime = (a, b) => (a.due_time || '99').localeCompare(b.due_time || '99') || a.priority - b.priority;
+  return [
+    { k: 'inbox', name: 'Входящие', hint: 'без даты', items: todo.filter(x => !x.in_progress && !x.due_date).sort((a, b) => a.priority - b.priority) },
+    { k: 'planned', name: 'Запланировано', hint: 'после сегодня', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date > t).sort((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b)) },
+    { k: 'today', name: 'Сегодня', hint: 'и просрочка', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date <= t).sort((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b)) },
+    { k: 'doing', name: 'В работе', hint: '', items: todo.filter(x => x.in_progress).sort(byTime) },
+    { k: 'done', name: 'Готово', hint: 'за 7 дней', items: all.filter(x => x.status === 'done' && (localDone(x) || '') >= weekAgo).sort((a, b) => String(b.done_at).localeCompare(String(a.done_at))) },
+  ];
+}
+function cardHtml(x) {
+  const a = area(x.area_id), t = D.today, subs = D.tasks.filter(s => s.parent_id === x.id && s.status !== 'cancelled');
+  const m = [];
+  if (x.due_date && x.status === 'todo') m.push(`<span class="${x.due_date < t ? 'ov' : ''}">${x.due_date < t ? '⚠ ' : ''}${esc(fdate(x.due_date))}${x.due_time ? ' · ' + esc(x.due_time) : ''}</span>`);
+  if (a) m.push(`<span><span class="dot" style="background:${esc(a.color)}"></span>${esc(a.name)}</span>`);
+  if (x.estimate_min) m.push(`<span>~${fmin(x.estimate_min)}</span>`);
+  if (subs.length) m.push(`<span>☑ ${subs.filter(s => s.status === 'done').length}/${subs.length}</span>`);
+  if (x.priority === 1 && x.status === 'todo') m.push('<span class="p1">срочно</span>');
+  if (x.recurrence) m.push('<span>повтор</span>');
+  return `<div class="kc ${x.status === 'done' ? 'done' : ''}" data-id="${x.id}" data-edit="${x.id}"><div class="t">${esc(x.title)}</div>${m.length ? `<div class="m">${m.join('')}</div>` : ''}</div>`;
+}
+function vBoard() {
+  const cols = boardCols();
+  const used = new Set(D.tasks.filter(x => x.status !== 'cancelled').map(x => x.area_id));
+  const chips = [`<button class="chip ${!fArea ? 'on' : ''}" data-fa="0">Все сферы</button>`]
+    .concat(D.areas.filter(a => used.has(a.id)).map(a => `<button class="chip ${fArea === a.id ? 'on' : ''}" data-fa="${a.id}"><span class="dot" style="background:${esc(a.color)};margin:0"></span>${esc(a.name)}</button>`));
+  return `<div class="bfil">${chips.join('')}</div><div class="board">${cols.map(c => `<section class="col ${c.k}"><h3><span>${c.name} <small>${c.items.length}</small></span><small>${c.hint}</small></h3>
+    <div class="drop" data-col="${c.k}">${c.items.map(cardHtml).join('')}</div>
+    ${c.k !== 'done' ? `<form class="kadd" data-add="${c.k}"><label class="sr" for="ka-${c.k}">Новая задача в «${c.name}»</label><input id="ka-${c.k}" placeholder="+ задача" autocomplete="off"></form>` : ''}</section>`).join('')}</div>
+    <p class="empty">Перетаскивай карточки между колонками: дата и статус поменяются сами. Нажми на карточку, чтобы открыть.</p>`;
+}
+function loadSortable() {
+  return window.Sortable ? Promise.resolve() : new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js';
+    sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
+  });
+}
+function colPatch(col, x) {
+  const t = D.today;
+  if (col === 'inbox') return { due_date: null, due_time: null, in_progress: false };
+  if (col === 'planned') return { due_date: x.due_date && x.due_date > t ? x.due_date : addDays(t, 1), in_progress: false };
+  if (col === 'today') return { due_date: t, in_progress: false };
+  if (col === 'doing') return { in_progress: true, ...(x.due_date ? {} : { due_date: t }) };
+  return {};
+}
+async function moveCard(id, from, to) {
+  const x = D.tasks.find(t => t.id === id); if (!x || from === to) return;
+  try {
+    if (to === 'done') { const r = await call('task_done', { id }); toast(r.message); }
+    else {
+      if (from === 'done') await call('task_undo', { id });
+      const p = colPatch(to, x);
+      if (p.due_date === x.due_date) delete p.due_date;
+      await call('task_update', { id, patch: p });
+      toast({ inbox: 'Во входящие', planned: 'Запланировано', today: 'На сегодня', doing: 'В работе' }[to]);
+    }
+  } catch (e) { toast(e.message); }
+  await load();
+}
+async function bindBoard() {
+  document.querySelectorAll('[data-fa]').forEach(b => b.onclick = () => { fArea = +b.dataset.fa; render(); });
+  document.querySelectorAll('[data-add]').forEach(f => f.onsubmit = async e => {
+    e.preventDefault(); const inp = f.querySelector('input'), v = inp.value.trim(); if (!v) return;
+    const task = { title: v, priority: 3, area_id: fArea || null, ...colPatch(f.dataset.add, {}) };
+    delete task.due_time;
+    try { await call('task_add', { task }); await load(); const n = document.querySelector(`#ka-${f.dataset.add}`); if (n) n.focus(); } catch (er) { toast(er.message); }
+  });
+  try { await loadSortable(); } catch (e) { return; }
+  document.querySelectorAll('.drop').forEach(el => window.Sortable.create(el, {
+    group: 'board', sort: false, animation: 150, delay: 120, delayOnTouchOnly: true,
+    ghostClass: 'kghost', chosenClass: 'chosen',
+    onEnd: ev => { if (ev.from !== ev.to) moveCard(+ev.item.dataset.id, ev.from.dataset.col, ev.to.dataset.col); },
+  }));
+}
+
+let SRCH = '';
+function allPanel() {
+  const t = D.today;
+  const rest = open().filter(x => x.due_date !== day && !(day === t && x.due_date && x.due_date < t));
+  const nodate = rest.filter(x => !x.due_date).sort((a, b) => a.priority - b.priority);
+  const dated = rest.filter(x => x.due_date).sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const row = x => { const a = area(x.area_id);
+    return `<div class="li" draggable="true" data-drag="${x.id}" data-q="${esc((x.title + ' ' + (a ? a.name : '')).toLowerCase())}">
+      <span class="tt" data-edit="${x.id}">${a ? `<span class="dot" style="background:${esc(a.color)}"></span>` : ''}${esc(x.title)}${x.due_date ? ` <small style="color:var(--mut)">· ${esc(fdate(x.due_date))}</small>` : ''}${x.priority === 1 ? ' <small style="color:var(--red);font-weight:700">срочно</small>' : ''}</span>
+      <button class="mini" data-move="${x.id}" data-to="${day}">+ ${day === t ? 'сегодня' : 'на день'}</button></div>`; };
+  return `<div class="card allp"><div class="ch"><span>Все дела</span><span>${rest.length}</span></div>
+    <label class="sr" for="srch">Поиск по делам</label><input class="srch" id="srch" placeholder="Поиск…" value="${esc(SRCH)}" autocomplete="off">
+    <div class="scroll">${nodate.length ? `<div class="grp">Без даты</div>${nodate.map(row).join('')}` : ''}
+    ${dated.length ? `<div class="grp">Другие дни</div>${dated.map(row).join('')}` : ''}
+    ${!rest.length ? '<p class="empty">Других дел нет 👌</p>' : ''}</div>
+    <p class="empty" style="font-size:12px;padding-bottom:0">Перетащи дело на шкалу часов — оно встанет на это время.</p></div>`;
+}
+function bindAllPanel() {
+  const sr = $('#srch');
+  const apply = () => { const q = SRCH.trim().toLowerCase(); document.querySelectorAll('.allp [data-q]').forEach(r => r.style.display = !q || r.dataset.q.includes(q) ? '' : 'none'); };
+  if (sr) { sr.oninput = () => { SRCH = sr.value; apply(); }; apply(); }
+  document.querySelectorAll('[data-drag]').forEach(r => r.ondragstart = e => { e.dataTransfer.setData('text/plain', r.dataset.drag); e.dataTransfer.effectAllowed = 'move'; });
+  const tl = document.querySelector('.tl'); if (!tl) return;
+  const ROWH = 52, at = e => { const y = e.clientY - tl.getBoundingClientRect().top; return Math.max(START * 60, Math.min((END - 1) * 60 + 45, START * 60 + Math.round(y / ROWH * 4) * 15)); };
+  let mark = null;
+  tl.ondragover = e => { e.preventDefault(); tl.classList.add('over'); const m = at(e);
+    if (!mark) { mark = document.createElement('div'); mark.className = 'dropmark'; tl.appendChild(mark); }
+    mark.style.top = ((m - START * 60) / 60 * ROWH) + 'px'; mark.innerHTML = `<span>${hhmm(m)}</span>`; };
+  tl.ondragleave = e => { if (!tl.contains(e.relatedTarget)) { tl.classList.remove('over'); mark?.remove(); mark = null; } };
+  tl.ondrop = async e => { e.preventDefault(); tl.classList.remove('over'); mark?.remove(); mark = null;
+    const id = +e.dataTransfer.getData('text/plain'); if (!id) return; const m = at(e);
+    try { await call('task_update', { id, patch: { due_date: day, due_time: hhmm(m), in_progress: false } }); toast(`Поставил на ${hhmm(m)}`); load(); } catch (er) { toast(er.message); } };
+  // блоки на шкале тоже можно двигать по времени
+  document.querySelectorAll('.blk').forEach(b => { b.draggable = true; b.ondragstart = e => { e.dataTransfer.setData('text/plain', b.dataset.edit); }; });
 }
 function liHtml(x) {
   const isDone = x.status === 'done', a = area(x.area_id);
@@ -374,6 +518,8 @@ function bind() {
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openTask(D.tasks.find(t => t.id === +b.dataset.edit)));
   document.querySelectorAll('[data-goal]').forEach(b => b.onclick = () => openGoal(D.goals.find(g => g.id === +b.dataset.goal)));
   const ag = $('#addGoal'); if (ag) ag.onclick = () => openGoal(null);
+  if (tab === 'board') bindBoard();
+  if (tab === 'day') bindAllPanel();
   const rb = $('#revBtn'); if (rb) rb.onclick = async () => {
     revBusy = true; render();
     try { const r = await call('review'); L.review = r.text; } catch (er) { toast(er.message); }
@@ -491,7 +637,7 @@ function openSettings(keep) {
 }
 
 load();
-setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && !revBusy && tab !== 'life' && document.activeElement?.id !== 'qi') load(); }, 60000);
+setInterval(() => { if (KEY && D && !$('#dlg').open && document.visibilityState === 'visible' && !planBusy && !revBusy && tab !== 'life' && !document.querySelector('.chosen') && !(document.activeElement?.id || '').startsWith('ka-') && document.activeElement?.id !== 'srch' && document.activeElement?.id !== 'qi') load(); }, 60000);
 }
 </script>
 </body>
