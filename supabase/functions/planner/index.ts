@@ -80,7 +80,7 @@ async function send(chat: string | number, text: string, extra: Record<string, u
 // ---------- задачи ----------
 const TASK_COLS = sql`t.id, t.title, t.notes, t.area_id, t.goal_id, t.parent_id, t.priority, t.status,
   t.due_date::text as due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.remind_at, t.reminded,
-  t.estimate_min, t.recurrence, t.postponed_count, t.created_at, t.done_at, t.source, t.in_progress,
+  t.estimate_min, t.recurrence, t.postponed_count, t.created_at, t.done_at, t.source, t.in_progress, t.sort_order,
   a.name as area, a.emoji as area_emoji`;
 
 // deno-lint-ignore no-explicit-any
@@ -137,7 +137,7 @@ function listMsg(title: string, tasks: Task[], empty = "Пусто 🎉") {
 async function openTasks(): Promise<Task[]> {
   return await sql`select ${TASK_COLS} from life.tasks t left join life.areas a on a.id = t.area_id
     where t.status = 'todo'
-    order by t.due_date nulls last, t.due_time nulls last, t.priority, t.id`;
+    order by t.due_date nulls last, t.due_time nulls last, t.sort_order nulls last, t.priority, t.id`;
 }
 async function getTask(id: number): Promise<Task | null> {
   const r = await sql`select ${TASK_COLS} from life.tasks t left join life.areas a on a.id = t.area_id where t.id = ${id}`;
@@ -245,7 +245,7 @@ async function completeTask(id: number): Promise<string> {
 }
 
 const EDITABLE = ["title", "notes", "area_id", "goal_id", "priority", "due_date", "due_time",
-  "estimate_min", "recurrence", "status", "parent_id", "in_progress"];
+  "estimate_min", "recurrence", "status", "parent_id", "in_progress", "sort_order"];
 // deno-lint-ignore no-explicit-any
 async function updateTask(id: number, f: any): Promise<Task | null> {
   const t = await getTask(id);
@@ -478,7 +478,7 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
 - "Что на сегодня/завтра/неделю", "что просрочено", "покажи всё" → show со scope.
 - "Спланируй день", "что делать сейчас", "с чего начать" → plan.
 - "Хочу/мечтаю/цель ..." (про жизнь, не конкретное дело) → goal_add (goal_kind dream или goal, title).
-- Регулярный распорядок — повторяющийся блок времени ("работа с 11 до 19", "по субботам группы 10–14", "спортзал пн/ср/пт в 7–8", "сплю с 23 до 7") → routine_add (title, days 1=пн…7=вс, start_time, end_time, area). Если дни не названы для работы — пн–пт. Это НЕ задача и НЕ remember. Если такой блок уже есть в распорядке — не дублируй. "Убери из распорядка X" → routine_delete с routine_id.
+- Регулярный распорядок — повторяющийся блок времени ("работа с 11 до 19", "по субботам группы 10–14", "спортзал пн/ср/пт в 7–8", "сплю с 23 до 7") → routine_add (title, days 1=пн…7=вс, start_time, end_time, area). Если дни не названы для работы — пн–пт. Регулярные занятия/уроки/тренировки/встречи с конкретным временем («уроки каждую среду в 19:00», «по субботам группы в 10») — это тоже routine_add (конец = начало + разумная длительность), а не задача с recurrence. recurrence — только для дел-напоминаний без блока времени («оплатить интернет каждый месяц», «полить цветы по субботам»). Это НЕ задача и НЕ remember. Если такой блок уже есть в распорядке — не дублируй. "Убери из распорядка X" → routine_delete с routine_id.
 - "Запомни/учти/знай, что ..." или явный устойчивый факт о жизни (режим, люди, работа, предпочтения) → remember (fact кратко, от третьего лица). Обычные задачи НЕ запоминай. "Забудь ..." → forget с memory_id.
 - "Как мой баланс", "что проседает", "обзор жизни/недели" → balance.
 - Учитывай факты о пользователе при выборе сферы, времени и приоритета.
@@ -1209,6 +1209,11 @@ async function api(body: any) {
   }
   if (op === "task_add") return { task: await addTask(body.task ?? {}, "web") };
   if (op === "task_update") return { task: await updateTask(+body.id, body.patch ?? {}) };
+  if (op === "task_reorder") {
+    const ids: number[] = (body.ids ?? []).map((x: unknown) => +x).filter(Boolean).slice(0, 300);
+    for (let i = 0; i < ids.length; i++) await sql`update life.tasks set sort_order = ${i} where id = ${ids[i]}`;
+    return { ok: true };
+  }
   if (op === "task_done") return { message: await completeTask(+body.id) };
   if (op === "task_undo") return { task: await updateTask(+body.id, { status: "todo" }) };
   if (op === "task_delete") return { task: await updateTask(+body.id, { status: "cancelled" }) };

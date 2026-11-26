@@ -367,11 +367,12 @@ function boardCols() {
   const all = D.tasks.filter(x => !x.parent_id && x.status !== 'cancelled' && (!fArea || x.area_id === fArea) && !(x.recurrence && x.status === 'todo' && x.due_date && x.due_date > t));
   const todo = all.filter(x => x.status === 'todo');
   const byTime = (a, b) => (a.due_time || '99').localeCompare(b.due_time || '99') || a.priority - b.priority;
+  const man = cmp => (a, b) => ((a.sort_order ?? 1e9) - (b.sort_order ?? 1e9)) || cmp(a, b); // ручной порядок важнее
   return [
-    { k: 'inbox', name: 'Входящие', hint: 'без даты', items: todo.filter(x => !x.in_progress && !x.due_date).sort((a, b) => a.priority - b.priority) },
-    { k: 'planned', name: 'Запланировано', hint: 'после сегодня', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date > t).sort((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b)) },
-    { k: 'today', name: 'Сегодня', hint: 'и просрочка', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date <= t).sort((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b)) },
-    { k: 'doing', name: 'В работе', hint: '', items: todo.filter(x => x.in_progress).sort(byTime) },
+    { k: 'inbox', name: 'Входящие', hint: 'без даты', items: todo.filter(x => !x.in_progress && !x.due_date).sort(man((a, b) => a.priority - b.priority)) },
+    { k: 'planned', name: 'Запланировано', hint: 'после сегодня', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date > t).sort(man((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b))) },
+    { k: 'today', name: 'Сегодня', hint: 'и просрочка', items: todo.filter(x => !x.in_progress && x.due_date && x.due_date <= t).sort(man((a, b) => a.due_date.localeCompare(b.due_date) || byTime(a, b))) },
+    { k: 'doing', name: 'В работе', hint: '', items: todo.filter(x => x.in_progress).sort(man(byTime)) },
     { k: 'done', name: 'Готово', hint: 'за 7 дней', items: all.filter(x => x.status === 'done' && (localDone(x) || '') >= weekAgo).sort((a, b) => String(b.done_at).localeCompare(String(a.done_at))) },
   ];
 }
@@ -403,7 +404,7 @@ function vBoard() {
   return `<div class="bfil">${chips.join('')}</div>${form}<div class="board">${cols.map(c => `<section class="col ${c.k}"><h3><span>${c.name} <small>${c.items.length}</small></span><small>${c.hint}</small></h3>
     <div class="drop" data-col="${c.k}">${c.items.map(cardHtml).join('')}</div>
     ${c.k !== 'done' ? `<form class="kadd" data-add="${c.k}"><label class="sr" for="ka-${c.k}">Новая задача в «${c.name}»</label><input id="ka-${c.k}" placeholder="+ задача" autocomplete="off"></form>` : ''}</section>`).join('')}</div>
-    <p class="empty">Перетаскивай карточки между колонками: дата и статус поменяются сами. Нажми на карточку, чтобы открыть.</p>`;
+    <p class="empty">Перетаскивай карточки между колонками — дата и статус поменяются сами. Вверх-вниз внутри колонки — порядок важности: сверху самое важное. Нажми на карточку, чтобы открыть.</p>`;
 }
 function loadSortable() {
   return window.Sortable ? Promise.resolve() : new Promise((res, rej) => {
@@ -458,9 +459,13 @@ async function bindBoard() {
   });
   try { await loadSortable(); } catch (e) { return; }
   document.querySelectorAll('.drop').forEach(el => window.Sortable.create(el, {
-    group: 'board', sort: false, animation: 150, delay: 120, delayOnTouchOnly: true,
+    group: 'board', sort: el.dataset.col !== 'done', animation: 150, delay: 120, delayOnTouchOnly: true,
     ghostClass: 'kghost', chosenClass: 'chosen',
-    onEnd: ev => { if (ev.from !== ev.to) moveCard(+ev.item.dataset.id, ev.from.dataset.col, ev.to.dataset.col); },
+    onEnd: async ev => {
+      const ids = [...ev.to.querySelectorAll('.kc')].map(c => +c.dataset.id);
+      if (ev.from !== ev.to) { if (ev.to.dataset.col !== 'done') await call('task_reorder', { ids }).catch(() => {}); moveCard(+ev.item.dataset.id, ev.from.dataset.col, ev.to.dataset.col); }
+      else if (ev.oldIndex !== ev.newIndex) { try { await call('task_reorder', { ids }); toast('Порядок сохранён'); } catch (er) { toast(er.message); } load(); }
+    },
   }));
 }
 
