@@ -579,47 +579,154 @@ ${memory.map((m) => `${m.id}: ${m.fact}`).join("\n") || "(пока ничего)
   return out;
 }
 
-// ---------- план дня ----------
+// ---------- план дня (структурный: ИИ раскладывает, код проверяет и собирает текст) ----------
+const PLAN_TOOL = {
+  name: "day_plan",
+  description: "Разложить задачи дня по времени",
+  input_schema: {
+    type: "object",
+    properties: {
+      greeting: { type: "string", description: "одна короткая спокойная строка, без пафоса и без эмодзи-ракет" },
+      blocks: {
+        type: "array",
+        description: "блоки по времени, по порядку",
+        items: {
+          type: "object",
+          properties: {
+            start: { type: "string", description: "HH:MM" },
+            end: { type: "string", description: "HH:MM" },
+            ids: { type: "array", items: { type: "integer" }, description: "id задач из списка" },
+          },
+          required: ["start", "end", "ids"],
+        },
+      },
+      postpone: {
+        type: "array",
+        items: { type: "object", properties: { id: { type: "integer" }, to: { type: "string", enum: ["tomorrow", "weekend", "no_date"] } }, required: ["id", "to"] },
+      },
+      first_steps: {
+        type: "array",
+        description: "для больших целей, которые нельзя закрыть за один подход: первый конкретный шаг на 15–30 минут",
+        items: { type: "object", properties: { id: { type: "integer" }, step: { type: "string" } }, required: ["id", "step"] },
+      },
+      estimates: {
+        type: "array",
+        description: "оценка в минутах для задач, у которых её нет",
+        items: { type: "object", properties: { id: { type: "integer" }, min: { type: "integer" } }, required: ["id", "min"] },
+      },
+      advice: { type: "string", description: "необязательно: одна фраза о главном риске дня. Не повторяй то, что уже видно в плане." },
+    },
+    required: ["greeting", "blocks", "postpone"],
+  },
+};
+const hm = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const toM = (s: string) => { const [h, m] = String(s).split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+
 async function planText(kind: "morning" | "manual"): Promise<string> {
   const all = (await openTasks()).filter((t) => !t.parent_id);
   const today = todayStr();
+  const ln = localNow();
+  const nowM = Math.ceil((ln.getUTCHours() * 60 + ln.getUTCMinutes()) / 15) * 15;
+  const DAY_END = 22 * 60;
   const todays = all.filter((t) => t.due_date === today);
   const overdue = all.filter((t) => t.due_date && t.due_date < today);
-  const inbox = all.filter((t) => !t.due_date).sort((a, b) => a.priority - b.priority).slice(0, 8);
-  const load = [...todays, ...overdue].reduce((s, t) => s + (t.estimate_min ?? 30), 0);
+  const inbox = all.filter((t) => !t.due_date).sort((a, b) => a.priority - b.priority).slice(0, 6);
+  const rts = await routinesFor(today);
+  const workAreas = new Set(rts.map((r) => r.area_id).filter(Boolean));
+  const isWork = (t: Task) => workAreas.has(t.area_id);
+  const est = (t: Task) => t.estimate_min ?? 30;
+  // свободное время вне распорядка: от сейчас до 22:00
+  const busy = rts.map((r) => [toM(r.start), toM(r.end)]).sort((a, b) => a[0] - b[0]);
+  let freeMin = 0, cur = nowM;
+  const windows: string[] = [];
+  for (const [s, e] of [...busy, [DAY_END, DAY_END]]) {
+    const a = Math.max(cur, nowM), b = Math.min(s, DAY_END);
+    if (b - a >= 15) { freeMin += b - a; windows.push(`${hm(a)}–${hm(b)}`); }
+    cur = Math.max(cur, e);
+  }
+  const workLeft = rts.filter((r) => workAreas.has(r.area_id)).reduce((m, r) => m + Math.max(0, toM(r.end) - Math.max(toM(r.start), nowM)), 0);
+  const pool = [...overdue, ...todays];
+  const workLoad = pool.filter(isWork).reduce((m, t) => m + est(t), 0);
+  const persLoad = pool.filter((t) => !isWork(t)).reduce((m, t) => m + est(t), 0);
+
   const fallback = () => {
     const parts = [`<b>${kind === "morning" ? "Доброе утро! " : ""}План на ${WD_FULL[dowOf(today)]}</b>`];
-    parts.push(`Задач на сегодня: ${todays.length}, просрочено: ${overdue.length}, нагрузка ~${fmtMin(load)}.`);
-    if (load > 7 * 60) parts.push("⚠️ День перегружен — часть стоит перенести.");
+    parts.push(`Задач на сегодня: ${todays.length}, просрочено: ${overdue.length}. Свободно вне работы: ~${fmtMin(freeMin)}.`);
+    if (persLoad > freeMin) parts.push("⚠️ Личных дел больше, чем свободного времени — часть стоит перенести.");
     return parts.join("\n");
   };
-  if (!HAS_AI) return fallback();
+  if (!HAS_AI || !pool.length && !inbox.length) return fallback();
+
   const line = (t: Task) =>
-    `- [${t.id}] ${t.title} | приоритет ${t.priority} | ${t.due_time ?? "без времени"} | ~${t.estimate_min ?? 30} мин | ${t.area ?? ""}${t.postponed_count ? ` | переносилась ${t.postponed_count} раз` : ""}${t.due_date && t.due_date < today ? ` | просрочена с ${t.due_date}` : ""}`;
-  const prompt = `${nowLine()}
-Задачи на сегодня:
-${todays.map(line).join("\n") || "(нет)"}
-Просроченные:
-${overdue.map(line).join("\n") || "(нет)"}
-Без даты (самые важные):
+    `[${t.id}] ${t.title} | ${isWork(t) ? "РАБОТА" : "личное"} (${t.area ?? "без сферы"}) | приоритет ${t.priority}${t.due_time ? " | фикс. время " + t.due_time : ""} | ${t.estimate_min ? "~" + t.estimate_min + " мин" : "оценки нет"}${t.postponed_count ? ` | переносилась ${t.postponed_count} раз` : ""}${t.due_date && t.due_date < today ? ` | просрочена с ${t.due_date}` : ""}`;
+  const prompt = `${nowLine()} План строим с ${hm(nowM)} до 22:00.
+Распорядок сегодня: ${rts.map((r) => `${r.title} ${r.start}–${r.end}${r.area ? " (сфера " + r.area + ")" : ""}`).join("; ") || "(нет)"}
+Свободные окна вне распорядка: ${windows.join(", ") || "нет"} — всего ~${freeMin} мин.
+Рабочего времени осталось ~${workLeft} мин; рабочих задач ~${workLoad} мин. Личных задач ~${persLoad} мин (там, где нет оценки, считаю 30).
+Задачи на сегодня и просроченные:
+${pool.map(line).join("\n") || "(нет)"}
+Без даты (можно взять, если есть место):
 ${inbox.map(line).join("\n") || "(нет)"}
-Суммарная нагрузка сегодня+просрочка: ~${load} мин.
-Распорядок сегодня: ${(await routinesFor(today)).map((r) => `${r.title} ${r.start}–${r.end}`).join("; ") || "(нет)"}
 Факты о человеке: ${(await memoryFacts()).map((m) => m.fact).join("; ") || "(нет)"}
-Последние чекины (день: энергия/настроение 1–5, заметка): ${(await recentCheckins(5)).map((c) => `${c.day}: ${c.energy ?? "-"}/${c.mood ?? "-"} ${c.note ?? ""}`).join("; ") || "(нет)"}`;
-  const system = `Ты — личный планировщик. Составь ${kind === "morning" ? "утренний " : ""}план дня. Обращайся на "ты". Пиши обычным текстом без HTML и без markdown (никаких * и #), можно немного эмодзи.
-Структура:
-1) одна строка приветствия/настроя${kind === "morning" ? "" : " (можно пропустить)"};
-2) порядок дня: сначала дела со временем, остальное блоками по приоритету (утро/день/вечер), указывай оценку времени;
-3) если нагрузка больше ~6 часов или задач слишком много — честно скажи и предложи конкретно, что перенести;
-4) если есть просроченные больше 2 дней или задачи, перенесённые 3+ раз — спроси прямо: делаем, разбиваем на шаги или удаляем;
-5) если сегодня пусто — предложи 1–2 задачи из "без даты";
-6) учитывай распорядок: рабочие задачи ставь в рабочие блоки, личные — в свободные окна вне блоков; назови свободные окна;
-7) учитывай факты о человеке и его энергию: если вчера энергия была низкой — сделай день легче и скажи об этом.
-Максимум 15 строк. Без воды.`;
+Последние чекины (энергия/настроение 1–5): ${(await recentCheckins(3)).map((c) => `${c.day}: ${c.energy ?? "-"}/${c.mood ?? "-"}`).join("; ") || "(нет)"}`;
+  const system = `Ты раскладываешь день человека по времени. Будь реалистичным и конкретным.
+Жёсткие правила:
+1) Ничего не ставь раньше ${hm(nowM)} и позже 22:00. Блоки не пересекаются.
+2) Задачи с пометкой РАБОТА — только внутри рабочего блока распорядка. Личные (семья, финансы, частное менторство, быт, обучение) — только в свободные окна вне распорядка.
+3) Каждая задача либо в blocks, либо в postpone — никогда в обоих и никогда «или/или» в одном блоке.
+4) Только id из списков. Не придумывай задач, «буферов», «хвостов» и пустых блоков.
+5) Большие цели, которые нельзя закрыть за один подход («закрыть кредиты», «закрыть долги», «прочитать книгу», «начать обучение», «сделать технику на деньги»), — не делай вид, что они закрываются за 30 минут. Дай first_steps: конкретный первый шаг на 15–30 минут (например «выписать все кредиты: остаток, ставка, платёж») и ставь в блок именно его.
+6) Если личных задач больше, чем свободного времени (оставь ~20% запаса), — перенеси наименее срочные в postpone. Если рабочих больше, чем рабочего времени, — так же.
+7) Рабочие задачи внутри рабочего времени — это не перегруз; не пугай этим.
+8) Похожие мелкие дела можно объединять в один блок.
+9) Задачи «без даты» бери только если реально остаётся место.
+10) estimates — для всех задач без оценки, реалистично.
+11) Учитывай факты о человеке. Тон спокойный, на «ты».`;
   try {
-    const txt = (await llm("smart", system, prompt, undefined, 900)).text.trim();
-    return esc(txt) || fallback();
+    const input = (await llm("smart", system, prompt, PLAN_TOOL, 1600)).input;
+    if (!input) return fallback();
+    const byId = new Map([...pool, ...inbox].map((t) => [t.id, t]));
+    // оценки — сохраняем, чтобы в следующий раз считать точнее
+    for (const e of input.estimates ?? []) {
+      const t = byId.get(+e.id);
+      if (t && !t.estimate_min && +e.min > 0 && +e.min <= 600) { await sql`update life.tasks set estimate_min = ${+e.min} where id = ${t.id}`; t.estimate_min = +e.min; }
+    }
+    const post = new Map<number, string>();
+    for (const p of input.postpone ?? []) if (byId.has(+p.id) && pool.some((t) => t.id === +p.id)) post.set(+p.id, p.to);
+    const steps = new Map<number, string>((input.first_steps ?? []).map((x: { id: number; step: string }) => [+x.id, String(x.step)]));
+    const used = new Set<number>();
+    const lines: string[] = [];
+    // deno-lint-ignore no-explicit-any
+    const blocks = (input.blocks ?? []).filter((b: any) => /^\d{1,2}:\d{2}$/.test(b.start) && /^\d{1,2}:\d{2}$/.test(b.end))
+      .sort((a: { start: string }, b: { start: string }) => toM(a.start) - toM(b.start));
+    for (const b of blocks) {
+      const ids = (b.ids ?? []).map(Number).filter((id: number) => byId.has(id) && !post.has(id) && !used.has(id));
+      if (!ids.length) continue;
+      ids.forEach((id: number) => used.add(id));
+      const s = Math.max(toM(b.start), nowM), e = Math.min(toM(b.end), DAY_END + 60);
+      if (e <= s) continue;
+      const items = ids.map((id: number) => {
+        const t = byId.get(id)!;
+        const st = steps.get(id);
+        return st ? `${t.title} → шаг: ${st}` : t.title;
+      });
+      lines.push(`${hm(s)}–${hm(e)} · ${items.join("; ")}`);
+    }
+    const missed = pool.filter((t) => !used.has(t.id) && !post.has(t.id));
+    const toTxt: Record<string, string> = { tomorrow: "на завтра", weekend: "на выходные", no_date: "без даты" };
+    const out: string[] = [];
+    out.push(String(input.greeting ?? "").trim() || (kind === "morning" ? "Доброе утро!" : "План на сегодня:"));
+    out.push("");
+    out.push(...(lines.length ? lines : ["Сегодня по задачам свободно."]));
+    if (post.size) {
+      out.push("");
+      out.push("Предлагаю перенести:");
+      for (const [id, to] of post) out.push(`• ${byId.get(id)!.title} — ${toTxt[to] ?? "на завтра"}`);
+    }
+    if (missed.length) { out.push(""); out.push("Не влезло в план: " + missed.map((t) => t.title).join(", ")); }
+    if (input.advice) { out.push(""); out.push(String(input.advice).trim()); }
+    await setSetting("plan_postpone", post.size ? JSON.stringify([...post.entries()]) : null);
+    return esc(out.join("\n"));
   } catch (e) {
     console.error(e);
     return fallback();
@@ -635,7 +742,8 @@ async function savePlan(txt: string) {
 async function sendPlan(chat: string | number, kind: "morning" | "manual") {
   const txt = await planText(kind);
   await savePlan(txt);
-  await send(chat, txt);
+  const pp = (await getSettings()).plan_postpone;
+  await send(chat, txt, pp ? { reply_markup: { inline_keyboard: [[{ text: "📅 Перенести предложенное", callback_data: "pp" }]] } } : {});
   const v = await view("today");
   await send(chat, v.text, v.extra);
 }
@@ -1148,6 +1256,14 @@ async function onCallback(q: any, s: S) {
     await updateTask(id, { status: "cancelled" });
     toast = "🗑 Удалено";
     await finishSingle(toast);
+  } else if (op === "pp") {
+    const pp = JSON.parse(s.plan_postpone ?? (await getSettings()).plan_postpone ?? "[]") as [number, string][];
+    const today = todayStr();
+    const sat = (() => { let d = addDays(today, 1); while (dowOf(d) !== 6) d = addDays(d, 1); return d; })();
+    for (const [tid, to] of pp) await updateTask(tid, { due_date: to === "no_date" ? null : to === "weekend" ? sat : addDays(today, 1), due_time: null });
+    await setSetting("plan_postpone", null);
+    toast = `📅 Перенёс ${pp.length}`;
+    await tg("editMessageReplyMarkup", { chat_id: chat, message_id: msg.message_id, reply_markup: { inline_keyboard: [] } });
   } else if (op === "pa") {
     const today = todayStr();
     const left = (await openTasks()).filter((t) => !t.parent_id && t.due_date && t.due_date <= today);
